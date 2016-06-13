@@ -198,7 +198,7 @@ defmodule RaftedValue.Logs do
       |> Enum.find(fn {_, _, atom, _} -> atom in [:add_follower, :remove_follower] end)
     new_members =
       if last_member_change_entry do
-        %Members{members | all: new_members_set, uncommitted_change: last_member_change_entry}
+        %Members{members | all: new_members_set, uncommitted_membership_change: last_member_change_entry}
       else
         %Members{members | all: new_members_set}
       end

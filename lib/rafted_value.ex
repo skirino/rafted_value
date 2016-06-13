@@ -26,6 +26,10 @@ defmodule RaftedValue do
     :gen_fsm.send_event(follower, :leave_and_stop)
   end
 
+  defun replace_leader(current_leader :: GenServer.server, new_leader :: g[pid]) :: :ok | {:error, atom} do
+    :gen_fsm.sync_send_event(current_leader, {:replace_leader, new_leader})
+  end
+
   @type command_identifier :: reference | any
 
   defun run_command(leader :: GenServer.server, command_arg :: any, timeout :: timeout \\ 5000, id :: command_identifier \\ make_ref) :: {:ok, any} | {:error, atom} do

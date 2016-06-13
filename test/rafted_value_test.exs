@@ -20,10 +20,18 @@ defmodule RaftedValueTest do
   defp wait_until_member_change_completes(leader) do
     :timer.sleep(10)
     {:leader, state} = :sys.get_state(leader)
-    if state.members.uncommitted_change do
+    if state.members.uncommitted_membership_change do
       wait_until_member_change_completes(leader)
     else
       :ok
+    end
+  end
+
+  defp wait_until_state_name_changes(member, state_name) do
+    :timer.sleep(10)
+    case :sys.get_state(member) do
+      {^state_name, _} -> :ok
+      _                -> wait_until_state_name_changes(member, state_name)
     end
   end
 
@@ -96,14 +104,14 @@ defmodule RaftedValueTest do
     ref1 = simulate_send_sync_event.({:add_follower, self})
     ref2 = simulate_send_sync_event.({:add_follower, self})
     assert_receive({^ref1, {:ok, %RaftedValue.RPC.InstallSnapshot{}}})
-    assert_receive({^ref2, {:error, :previous_membership_change_not_yet_committed}})
+    assert_receive({^ref2, {:error, :uncommitted_membership_change}})
 
     wait_until_member_change_completes(leader)
 
     ref1 = simulate_send_sync_event.({:remove_follower, self})
     ref2 = simulate_send_sync_event.({:remove_follower, self})
     assert_receive({^ref1, :ok})
-    assert_receive({^ref2, {:error, :previous_membership_change_not_yet_committed}})
+    assert_receive({^ref2, {:error, :uncommitted_membership_change}})
   end
 
   test "should report error when trying to add already joined member" do
@@ -120,6 +128,22 @@ defmodule RaftedValueTest do
   test "start_link_and_join_consensus_group should return error and the process should die when no leader found" do
     {:error, _} = RaftedValue.start_link({:join_existing_consensus_group, [:unknown, :member]})
     assert_receive({:EXIT, _pid, _})
+  end
+
+  test "replace_leader should eventually replace leader" do
+    {leader, [follower1, follower2]} = make_cluster(2)
+
+    assert RaftedValue.replace_leader(leader, follower1) == :ok
+    wait_until_state_name_changes(leader, :follower)
+    wait_until_state_name_changes(follower1, :leader)
+    assert RaftedValue.run_command(leader   , :inc) == {:error, {:not_leader, follower1}}
+    assert RaftedValue.run_command(follower1, :inc) == {:ok, 0}
+
+    assert RaftedValue.replace_leader(follower1, follower2) == :ok
+    wait_until_state_name_changes(follower1, :follower)
+    wait_until_state_name_changes(follower2, :leader)
+    assert RaftedValue.run_command(follower1, :inc) == {:error, {:not_leader, follower2}}
+    assert RaftedValue.run_command(follower2, :inc) == {:ok, 1}
   end
 
   test "leader should respond to client requests" do

@@ -26,6 +26,7 @@ defmodule RaftedValue.Server do
   #   - {:command, arg, cmd_id}
   #   - {:add_follower, pid}
   #   - {:remove_follower, pid}
+  #   - {:replace_leader, new_leader}
   #
 
   alias RaftedValue.{TermNumber, PidSet, Members, Leadership, Election, Logs, CommandResults, Config}
@@ -100,7 +101,7 @@ defmodule RaftedValue.Server do
         {:error, {:not_leader, nil}}    -> call_add_server(known_members)
         {:error, {:not_leader, leader}} -> call_add_server([leader | Enum.reject(known_members, &(&1 == leader))])
         {:error, :noproc}               -> call_add_server(known_members)
-        # {:error, :previous_membership_change_not_yet_committed} results in an error
+        # {:error, :uncommitted_membership_change} results in an error
       end
   end
 
@@ -121,7 +122,18 @@ defmodule RaftedValue.Server do
       if success do
         {new_logs, applicable_entries} = Logs.set_follower_index(logs, members, current_term, from, i_replicated)
         new_state1 = %State{state | logs: new_logs}
-        Enum.reduce(applicable_entries, new_state1, &leader_apply_committed_log_entry/2)
+        new_state2 = Enum.reduce(applicable_entries, new_state1, &leader_apply_committed_log_entry/2)
+        case members do
+          %Members{pending_leader_change: ^from} ->
+            if i_replicated == new_logs.i_max do
+              # now we know that the follower `from`'s logs are up-to-date; send `:election_timeout` to make it a new leader
+              send_event(new_state2, from, :election_timeout)
+              convert_state_as_follower(new_state2, current_term) |> next_state(:follower)
+            else
+              same_fsm_state(new_state2)
+            end
+          _ -> same_fsm_state(new_state2)
+        end
       else
         # prev log from leader didn't match follower's => decrement "next index" for the follower and try to resend AppendEntries
         case Logs.decrement_next_index_of_follower(logs, from) do
@@ -135,8 +147,8 @@ defmodule RaftedValue.Server do
             send_event(new_state, from, make_install_snapshot(new_state))
             new_state
         end
+        |> same_fsm_state
       end
-      |> same_fsm_state
     end)
   end
   def leader(:heartbeat_timeout, state) do
@@ -151,7 +163,7 @@ defmodule RaftedValue.Server do
     end)
   end
   def leader(_event, state) do
-    same_fsm_state(state) # leader neglects `:election_timeout`, `:leave_and_stop`,  `:remove_follower_completed`, `InstallSnapshot`
+    same_fsm_state(state) # leader neglects `:election_timeout`, `:leave_and_stop`, `:remove_follower_completed`, `InstallSnapshot`
   end
 
   def leader({:command, arg, cmd_id}, from, %State{current_term: term, logs: logs, config: config} = state) do
@@ -183,6 +195,14 @@ defmodule RaftedValue.Server do
         %State{state | members: new_members, logs: new_logs}
         |> broadcast_append_entries
         |> same_fsm_state_reply(:ok)
+    end
+  end
+  def leader({:replace_leader, new_leader},
+             _from,
+             %State{members: members} = state) do
+    case Members.start_replacing_leader(members, new_leader) do
+      {:ok, new_members} -> %State{state | members: new_members} |> same_fsm_state_reply(:ok)
+      {:error, _} = e    -> same_fsm_state_reply(state, e)
     end
   end
 
@@ -322,18 +342,23 @@ defmodule RaftedValue.Server do
   end
 
   defp become_follower_if_new_term_started(%{term: term} = rpc,
-                                           %State{members: members, current_term: current_term, election: election, config: config} = state,
+                                           %State{current_term: current_term} = state,
                                            else_fn) do
     if term > current_term do
-      new_members  = Members.put_leader(members, nil)
-      new_election = Election.replace_for_follower(election, config)
-      new_state    = %State{state | members: new_members, current_term: term, election: new_election} |> cancel_heartbeat_timer
+      new_state = convert_state_as_follower(state, term)
       # process the given RPC message as a follower
       # (there are cases where `election.timer` started right above will be immediately resetted in `follower/2` but it's rare)
       follower(rpc, new_state)
     else
       else_fn.()
     end
+  end
+
+  defunp convert_state_as_follower(%State{members: members, election: election, config: config} = state,
+                                   new_term :: TermNumber.t) :: State.t do
+    new_members  = Members.put_leader(members, nil)
+    new_election = Election.replace_for_follower(election, config)
+    %State{state | members: new_members, current_term: new_term, election: new_election} |> cancel_heartbeat_timer
   end
 
   #
