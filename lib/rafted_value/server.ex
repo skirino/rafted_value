@@ -117,10 +117,10 @@ defmodule RaftedValue.Server do
   # leader state
   #
   def leader(%AppendEntriesResponse{from: from, success: success, i_replicated: i_replicated} = rpc,
-             %State{members: members, current_term: current_term, logs: logs} = state) do
+             %State{members: members, current_term: current_term, logs: logs, config: config} = state) do
     become_follower_if_new_term_started(rpc, state, fn ->
       if success do
-        {new_logs, applicable_entries} = Logs.set_follower_index(logs, members, current_term, from, i_replicated)
+        {new_logs, applicable_entries} = Logs.set_follower_index(logs, members, current_term, from, i_replicated, config)
         new_state1 = %State{state | logs: new_logs}
         new_state2 = Enum.reduce(applicable_entries, new_state1, &leader_apply_committed_log_entry/2)
         case members do
@@ -206,12 +206,12 @@ defmodule RaftedValue.Server do
     |> next_state(:leader)
   end
 
-  defunp broadcast_append_entries(%State{members: members, logs: logs} = state) :: State.t do
+  defunp broadcast_append_entries(%State{members: members, logs: logs, config: config} = state) :: State.t do
     followers = Members.other_members_list(members)
     if Enum.empty?(followers) do
       # When there's no other member in this consensus group, the leader won't receive AppendEntriesResponse;
       # here is the time to make decisions (solely by itself) by committing new entries.
-      {new_logs, applicable_entries} = Logs.commit_to_latest(logs)
+      {new_logs, applicable_entries} = Logs.commit_to_latest(logs, config)
       new_state = %State{state | logs: new_logs}
       Enum.reduce(applicable_entries, new_state, &leader_apply_committed_log_entry/2)
     else

@@ -40,8 +40,8 @@ defmodule RaftedValue.Logs do
     %__MODULE__{map: %{1 => first_entry}, i_min: 1, i_max: 1, i_committed: 1, followers: %{}}
   end
 
-  defun commit_to_latest(%__MODULE__{map: map, i_max: i_max, i_committed: i_c} = logs) :: {t, [LogEntry.t]} do
-    new_logs = %__MODULE__{logs | i_committed: i_max}
+  defun commit_to_latest(%__MODULE__{map: map, i_max: i_max, i_committed: i_c} = logs, config :: Config.t) :: {t, [LogEntry.t]} do
+    new_logs = %__MODULE__{logs | i_committed: i_max} |> truncate_old_logs(config)
     applicable_entries = slice_entries(map, i_c + 1, i_max)
     {new_logs, applicable_entries}
   end
@@ -75,16 +75,18 @@ defmodule RaftedValue.Logs do
                            %Members{all: members_set},
                            current_term :: TermNumber.t,
                            follower_pid :: pid,
-                           i_replicated :: LogIndex.t) :: {t, [LogEntry.t]} do
+                           i_replicated :: LogIndex.t,
+                           config       :: Config.t) :: {t, [LogEntry.t]} do
     new_followers = Map.put(followers, follower_pid, {i_replicated + 1, i_replicated})
-    new_logs      = %__MODULE__{logs | followers: new_followers} |> update_commit_index(current_term, members_set)
+    new_logs      = %__MODULE__{logs | followers: new_followers} |> update_commit_index(current_term, members_set, config)
     applicable_entries = slice_entries(map, old_i_committed + 1, new_logs.i_committed)
     {new_logs, applicable_entries}
   end
 
   defunp update_commit_index(%__MODULE__{map: map, i_max: i_max, i_committed: i_c, followers: followers} = logs,
                              current_term :: TermNumber.t,
-                             members_set  :: PidSet.t) :: t do
+                             members_set  :: PidSet.t,
+                             config       :: Config.t) :: t do
     uncommitted_entries_reversed = slice_entries(map, i_c + 1, i_max) |> Enum.reverse
     last_commitable_entry_tuple =
       Stream.scan(uncommitted_entries_reversed, {nil, nil, members_set}, fn(entry, {_, _, members_for_this_entry}) ->
@@ -100,7 +102,7 @@ defmodule RaftedValue.Logs do
       end)
     case last_commitable_entry_tuple do
       nil           -> logs
-      {entry, _, _} -> %__MODULE__{logs | i_committed: elem(entry, 1)}
+      {entry, _, _} -> %__MODULE__{logs | i_committed: elem(entry, 1)} |> truncate_old_logs(config)
     end
   end
 
@@ -248,7 +250,8 @@ defmodule RaftedValue.Logs do
     end
   end
 
-  defunp truncate_old_logs(%__MODULE__{map: map, i_min: i_min, i_committed: i_c} = logs, %Config{max_retained_committed_logs: max_logs}) :: t do
+  defunp truncate_old_logs(%__MODULE__{map: map, i_min: i_min, i_committed: i_c} = logs,
+                           %Config{max_retained_committed_logs: max_logs}) :: t do
     new_i_min = i_c - max_logs + 1
     if new_i_min > i_min do
       new_map = Enum.reduce(i_min .. new_i_min - 1, map, fn(i, m) -> Map.delete(m, i) end)
