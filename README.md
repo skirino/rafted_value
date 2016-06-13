@@ -3,7 +3,6 @@
 ## Design
 
 - Each member in consensus group is a [`:gen_fsm`](http://erlang.org/doc/man/gen_fsm.html) process.
-- Distributed Erlang as inter-node communication.
 - Provides [linearizable](https://en.wikipedia.org/wiki/Linearizability) semantics for operations on a stored value.
 - Memory-based, no persisted state.
     - You can think of this as an cluster-wide version of [`Agent`](http://elixir-lang.org/docs/stable/elixir/Agent.html).

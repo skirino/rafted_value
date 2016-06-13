@@ -130,23 +130,16 @@ defmodule RaftedValue.Server do
               send_event(new_state2, from, :election_timeout)
               convert_state_as_follower(new_state2, current_term) |> next_state(:follower)
             else
+              # try again at next `AppendEntriesResponse`
               same_fsm_state(new_state2)
             end
           _ -> same_fsm_state(new_state2)
         end
       else
         # prev log from leader didn't match follower's => decrement "next index" for the follower and try to resend AppendEntries
-        case Logs.decrement_next_index_of_follower(logs, from) do
-          {:ok, new_logs} ->
-            new_state = %State{state | logs: new_logs}
-            send_append_entries(new_state, from)
-            new_state
-          {:too_old, new_logs} ->
-            # this follower lags too behind (necessary logs are already discarded) => send whole data as snapshot
-            new_state = %State{state | logs: new_logs}
-            send_event(new_state, from, make_install_snapshot(new_state))
-            new_state
-        end
+        new_logs = Logs.decrement_next_index_of_follower(logs, from)
+        %State{state | logs: new_logs}
+        |> send_append_entries(from)
         |> same_fsm_state
       end
     end)
@@ -222,17 +215,23 @@ defmodule RaftedValue.Server do
       new_state = %State{state | logs: new_logs}
       Enum.reduce(applicable_entries, new_state, &leader_apply_committed_log_entry/2)
     else
-      Enum.each(followers, fn follower ->
-        send_append_entries(state, follower)
+      Enum.reduce(followers, state, fn(follower, s) ->
+        send_append_entries(s, follower)
       end)
-      state
     end
     |> reset_heartbeat_timer
   end
 
-  defunp send_append_entries(%State{current_term: term, logs: logs} = state, follower :: pid) :: :ok do
-    req = Logs.make_append_entries_req(logs, term, follower)
-    send_event(state, follower, req)
+  defunp send_append_entries(%State{current_term: term, logs: logs} = state, follower :: pid) :: State.t do
+    case Logs.make_append_entries_req(logs, term, follower) do
+      {:ok, req} ->
+        send_event(state, follower, req)
+        state
+      {:too_old, new_logs} ->
+        new_state = %State{state | logs: new_logs} # reset follower's next index
+        send_event(new_state, follower, make_install_snapshot(new_state))
+        new_state
+    end
   end
 
   defunp make_install_snapshot(%State{members: members, current_term: term, logs: logs, data: data, command_results: command_results, config: config}) :: InstallSnapshot.t do

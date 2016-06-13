@@ -1,5 +1,6 @@
 use Croma
 alias Croma.TypeGen, as: TG
+alias Croma.Result, as: R
 
 defmodule RaftedValue.LogEntry do
   alias RaftedValue.{TermNumber, LogIndex}
@@ -8,7 +9,7 @@ defmodule RaftedValue.LogEntry do
            | {TermNumber.t, LogIndex.t, :remove_follower, pid}
            | {TermNumber.t, LogIndex.t, :command        , {GenServer.from, any, reference}}
 
-  defun validate(v :: any) :: Croma.Result.t(t) do
+  defun validate(v :: any) :: R.t(t) do
     {_, _, _, _} = t -> {:ok, t}
     _                -> {:error, {:invalid_value, [__MODULE__]}}
   end
@@ -45,23 +46,29 @@ defmodule RaftedValue.Logs do
     {new_logs, applicable_entries}
   end
 
-  defun make_append_entries_req(%__MODULE__{map: m, i_max: i_max, i_committed: i_c, followers: followers},
+  defun make_append_entries_req(%__MODULE__{map: m, i_min: i_min, i_max: i_max, i_committed: i_c, followers: followers} = logs,
                                 term         :: TermNumber.t,
-                                follower_pid :: pid) :: AppendEntriesRequest.t do
+                                follower_pid :: pid) :: {:ok, AppendEntriesRequest.t} | {:too_old, t} do
     {i_next, _} = followers[follower_pid]
-    i_prev = i_next - 1
-    term_prev =
-      case m[i_prev] do
-        nil   -> 0
-        entry -> elem(entry, 0)
-      end
-    %AppendEntriesRequest{
-      term:            term,
-      leader_pid:      self,
-      prev_log:        {term_prev, i_prev},
-      entries:         slice_entries(m, i_next, i_max),
-      i_leader_commit: i_c,
-    }
+    if i_next < i_min do
+      # this follower lags too behind (necessary logs are already discarded) => send whole data as snapshot
+      new_followers = Map.put(followers, follower_pid, {i_max + 1, 0})
+      {:too_old, %__MODULE__{logs | followers: new_followers}}
+    else
+      i_prev = i_next - 1
+      term_prev =
+        case m[i_prev] do
+          nil   -> 0
+          entry -> elem(entry, 0)
+        end
+      %AppendEntriesRequest{
+        term:            term,
+        leader_pid:      self,
+        prev_log:        {term_prev, i_prev},
+        entries:         slice_entries(m, i_next, i_max),
+        i_leader_commit: i_c,
+      } |> R.pure
+    end
   end
 
   defun set_follower_index(%__MODULE__{map: map, i_committed: old_i_committed, followers: followers} = logs,
@@ -114,17 +121,12 @@ defmodule RaftedValue.Logs do
     end
   end
 
-  defun decrement_next_index_of_follower(%__MODULE__{i_min: i_min, i_max: i_max, followers: followers} = logs,
-                                         follower_pid :: pid) :: {:ok | :too_old, t} do
+  defun decrement_next_index_of_follower(%__MODULE__{followers: followers} = logs,
+                                         follower_pid :: pid) :: t do
     {i_next_current, i_replicated} = followers[follower_pid]
     i_next_decremented = i_next_current - 1
-    if i_next_decremented < i_min do
-      new_followers = Map.put(followers, follower_pid, {i_max + 1, 0})
-      {:too_old, %__MODULE__{logs | followers: new_followers}}
-    else
-      new_followers = Map.put(followers, follower_pid, {i_next_decremented, i_replicated})
-      {:ok, %__MODULE__{logs | followers: new_followers}}
-    end
+    new_followers = Map.put(followers, follower_pid, {i_next_decremented, i_replicated})
+    %__MODULE__{logs | followers: new_followers}
   end
 
   defun add_entry(%__MODULE__{map: map, i_max: i_max} = logs, config :: Config.t, f :: (LogIndex.t -> LogEntry.t)) :: t do
