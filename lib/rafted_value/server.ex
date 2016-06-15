@@ -323,7 +323,7 @@ defmodule RaftedValue.Server do
   end
   def follower(:leave_and_stop, %State{members: members} = state) do
     new_state = cancel_election_timer(state)
-    _ = sync_send_event(state, members.leader, {:remove_follower, self})
+    _ = :gen_fsm.sync_send_event(members.leader, {:remove_follower, self})
     same_fsm_state(new_state)
   end
   def follower(:remove_follower_completed, state) do
@@ -452,10 +452,6 @@ defmodule RaftedValue.Server do
   #
   defp send_event(%State{config: %Config{communication_module: mod}}, dest, event) do
     mod.send_event(dest, event)
-  end
-
-  defp sync_send_event(%State{config: %Config{communication_module: mod}}, dest, event) do
-    mod.sync_send_event(dest, event)
   end
 
   defp reply(%State{config: %Config{communication_module: mod}}, from, reply) do
