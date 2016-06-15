@@ -35,7 +35,7 @@ defmodule RaftedValue.Logs do
   #
   # for leader
   #
-  defun init_for_lonely_leader :: t do
+  defun new_for_lonely_leader :: t do
     first_entry = {0, 1, :leader_elected, self}
     %__MODULE__{map: %{1 => first_entry}, i_min: 1, i_max: 1, i_committed: 1, followers: %{}}
   end
@@ -171,7 +171,7 @@ defmodule RaftedValue.Logs do
   #
   # for non-leader
   #
-  defun init_for_new_follower({_, i_committed, _, _} = last_committed_entry :: LogEntry.t) :: t do
+  defun new_for_new_follower({_, i_committed, _, _} = last_committed_entry :: LogEntry.t) :: t do
     m = %{i_committed => last_committed_entry}
     %__MODULE__{map: m, i_min: i_committed, i_max: i_committed, i_committed: i_committed}
   end

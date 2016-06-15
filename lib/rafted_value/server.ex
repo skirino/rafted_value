@@ -77,7 +77,7 @@ defmodule RaftedValue.Server do
   #
   def init({:create_new_consensus_group, config}) do
     data        = config.data_ops_module.new
-    logs        = Logs.init_for_lonely_leader
+    logs        = Logs.new_for_lonely_leader
     members     = Members.new_for_lonely_leader
     leadership  = Leadership.new_for_leader(config)
     election    = Election.new_for_leader
@@ -88,7 +88,7 @@ defmodule RaftedValue.Server do
   def init({:join_existing_consensus_group, known_members}) do
     %InstallSnapshot{members: members, term: term, last_committed_entry: last_entry, data: data, command_results: command_results, config: config} =
       call_add_server(known_members)
-    logs = Logs.init_for_new_follower(last_entry)
+    logs = Logs.new_for_new_follower(last_entry)
     election = Election.new_for_follower(config)
     state = %State{members: members, current_term: term, leadership: Leadership.new, election: election, logs: logs, data: data, command_results: command_results, config: config}
     {:ok, :follower, state}
@@ -332,7 +332,7 @@ defmodule RaftedValue.Server do
   def follower(%InstallSnapshot{members: members, term: term, last_committed_entry: last_entry, data: data, command_results: command_results} = rpc,
                state) do
     become_follower_if_new_term_started(rpc, state, fn ->
-      logs = Logs.init_for_new_follower(last_entry)
+      logs = Logs.new_for_new_follower(last_entry)
       %State{state | members: members, current_term: term, logs: logs, data: data, command_results: command_results}
       |> reset_election_timer
       |> same_fsm_state
