@@ -20,7 +20,8 @@ defmodule RaftedValueTest do
   defp wait_until_member_change_completes(leader) do
     :timer.sleep(10)
     {:leader, state} = :sys.get_state(leader)
-    if state.members.uncommitted_membership_change do
+    members = state.members
+    if members.uncommitted_membership_change && state.pending_leader_change do
       wait_until_member_change_completes(leader)
     else
       :ok
@@ -93,7 +94,7 @@ defmodule RaftedValueTest do
 
   test "should not concurrently execute multiple membership changes" do
     {:ok, leader} = RaftedValue.start_link({:create_new_consensus_group, @conf})
-    _follower1 = add_follower(leader)
+    follower1 = add_follower(leader)
 
     simulate_send_sync_event = fn(event) ->
       ref = make_ref
@@ -112,6 +113,16 @@ defmodule RaftedValueTest do
     ref2 = simulate_send_sync_event.({:remove_follower, self})
     assert_receive({^ref1, :ok})
     assert_receive({^ref2, {:error, :uncommitted_membership_change}})
+
+    wait_until_member_change_completes(leader)
+
+    ref1 = simulate_send_sync_event.({:replace_leader, follower1})
+    ref2 = simulate_send_sync_event.({:replace_leader, follower1})
+    assert_receive({^ref1, :ok})
+    assert_receive({^ref2, {:error, :pending_leader_change}})
+
+    wait_until_state_name_changes(leader, :follower)
+    wait_until_state_name_changes(follower1, :leader)
   end
 
   test "should report error when trying to add already joined member" do
