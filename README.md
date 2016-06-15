@@ -1,5 +1,12 @@
 # RaftedValue : A [Raft](https://raft.github.io/) implementation to replicate a value across cluster of Erlang VMs
 
+- [API Documentation](http://hexdocs.pm/rafted_value/)
+- [Hex package information](https://hex.pm/packages/rafted_value)
+
+[![Hex.pm](http://img.shields.io/hexpm/v/rafted_value.svg)](https://hex.pm/packages/rafted_value)
+[![Build Status](https://travis-ci.org/skirino/rafted_value.svg)](https://travis-ci.org/skirino/rafted_value)
+[![Coverage Status](https://coveralls.io/repos/github/skirino/rafted_value/badge.svg?branch=master)](https://coveralls.io/github/skirino/rafted_value?branch=master)
+
 ## Design
 
 - Each member in consensus group is a [`:gen_fsm`](http://erlang.org/doc/man/gen_fsm.html) process.
