@@ -22,6 +22,7 @@ defmodule RaftedValue.Server do
   #     - :election_timeout (also used as `TimeoutNow` when replacing leader)
   #     - :leave_and_stop
   #     - :remove_follower_completed
+  #     - :cannot_reach_quorum
   # - sync
   #   - {:command, arg, cmd_id}
   #   - {:add_follower, pid}
@@ -75,13 +76,13 @@ defmodule RaftedValue.Server do
   # initialization
   #
   def init({:create_new_consensus_group, config}) do
-    data = config.data_ops_module.new
-    logs = Logs.init_for_lonely_leader
-    members = Members.new_for_lonely_leader
-    election = Election.new_for_leader
-    state =
-      %State{members: members, current_term: 0, leadership: Leadership.new, election: election, logs: logs, data: data, command_results: CommandResults.new, config: config}
-      |> reset_heartbeat_timer
+    data        = config.data_ops_module.new
+    logs        = Logs.init_for_lonely_leader
+    members     = Members.new_for_lonely_leader
+    leadership  = Leadership.new_for_leader(config)
+    election    = Election.new_for_leader
+    cmd_results = CommandResults.new
+    state = %State{members: members, current_term: 0, leadership: leadership, election: election, logs: logs, data: data, command_results: cmd_results, config: config}
     {:ok, :leader, state}
   end
   def init({:join_existing_consensus_group, known_members}) do
@@ -117,11 +118,12 @@ defmodule RaftedValue.Server do
   # leader state
   #
   def leader(%AppendEntriesResponse{from: from, success: success, i_replicated: i_replicated} = rpc,
-             %State{members: members, current_term: current_term, logs: logs, config: config} = state) do
+             %State{members: members, current_term: current_term, leadership: leadership, logs: logs, config: config} = state) do
     become_follower_if_new_term_started(rpc, state, fn ->
+      new_leadership = Leadership.follower_responded(leadership, members, from, config)
       if success do
         {new_logs, applicable_entries} = Logs.set_follower_index(logs, members, current_term, from, i_replicated, config)
-        new_state1 = %State{state | logs: new_logs}
+        new_state1 = %State{state | leadership: new_leadership, logs: new_logs}
         new_state2 = Enum.reduce(applicable_entries, new_state1, &leader_apply_committed_log_entry/2)
         case members do
           %Members{pending_leader_change: ^from} ->
@@ -138,7 +140,7 @@ defmodule RaftedValue.Server do
       else
         # prev log from leader didn't match follower's => decrement "next index" for the follower and try to resend AppendEntries
         new_logs = Logs.decrement_next_index_of_follower(logs, from)
-        %State{state | logs: new_logs}
+        %State{state | leadership: new_leadership, logs: new_logs}
         |> send_append_entries(from)
         |> same_fsm_state
       end
@@ -146,6 +148,10 @@ defmodule RaftedValue.Server do
   end
   def leader(:heartbeat_timeout, state) do
     broadcast_append_entries(state) |> same_fsm_state
+  end
+  def leader(:cannot_reach_quorum, %State{current_term: term} = state) do
+    convert_state_as_follower(state, term)
+    |> next_state(:follower)
   end
   def leader(%RequestVoteRequest{} = rpc, state) do
     handle_request_vote_request(rpc, state, :leader)
@@ -206,13 +212,14 @@ defmodule RaftedValue.Server do
     |> next_state(:leader)
   end
 
-  defunp broadcast_append_entries(%State{members: members, logs: logs, config: config} = state) :: State.t do
+  defunp broadcast_append_entries(%State{members: members, leadership: leadership, logs: logs, config: config} = state) :: State.t do
     followers = Members.other_members_list(members)
     if Enum.empty?(followers) do
       # When there's no other member in this consensus group, the leader won't receive AppendEntriesResponse;
       # here is the time to make decisions (solely by itself) by committing new entries.
       {new_logs, applicable_entries} = Logs.commit_to_latest(logs, config)
-      new_state = %State{state | logs: new_logs}
+      new_leadership = Leadership.reset_quorum_timer(leadership, config) # quorum is reached by the leader itself
+      new_state = %State{state | leadership: new_leadership, logs: new_logs}
       Enum.reduce(applicable_entries, new_state, &leader_apply_committed_log_entry/2)
     else
       Enum.reduce(followers, state, fn(follower, s) ->
@@ -273,7 +280,7 @@ defmodule RaftedValue.Server do
     become_candidate_and_start_new_election(state)
   end
   def candidate(_event, state) do
-    same_fsm_state(state) # neglect `:heartbeat_timeout`, `:leave_and_stop`, `:remove_follower_completed`, `InstallSnapshot`
+    same_fsm_state(state) # neglect `:heartbeat_timeout`, `:leave_and_stop`, `:remove_follower_completed`, `cannot_reach_quorum`, `InstallSnapshot`
   end
 
   def candidate(_event, _from, %State{members: members} = state) do
@@ -332,7 +339,7 @@ defmodule RaftedValue.Server do
     end)
   end
   def follower(_event, state) do
-    same_fsm_state(state) # neglect `:heartbeat_timeout`
+    same_fsm_state(state) # neglect `:heartbeat_timeout`, `cannot_reach_quorum`,
   end
 
   def follower(_event, _from, %State{members: members} = state) do
@@ -353,11 +360,12 @@ defmodule RaftedValue.Server do
     end
   end
 
-  defunp convert_state_as_follower(%State{members: members, election: election, config: config} = state,
+  defunp convert_state_as_follower(%State{members: members, leadership: leadership, election: election, config: config} = state,
                                    new_term :: TermNumber.t) :: State.t do
-    new_members  = Members.put_leader(members, nil)
-    new_election = Election.replace_for_follower(election, config)
-    %State{state | members: new_members, current_term: new_term, election: new_election} |> cancel_heartbeat_timer
+    new_members    = Members.put_leader(members, nil)
+    new_leadership = Leadership.deactivate(leadership)
+    new_election   = Election.replace_for_follower(election, config)
+    %State{state | members: new_members, current_term: new_term, leadership: new_leadership, election: new_election}
   end
 
   #
@@ -365,8 +373,8 @@ defmodule RaftedValue.Server do
   #
   defp handle_append_entries_request(%AppendEntriesRequest{term: term, leader_pid: leader_pid, prev_log: prev_log,
                                                                      entries: entries, i_leader_commit: i_leader_commit},
-                                               %State{members: members, current_term: current_term, logs: logs, config: config} = state,
-                                               current_state_name) do
+                                     %State{members: members, current_term: current_term, logs: logs, config: config} = state,
+                                     current_state_name) do
     reply_as_failure = fn larger_term ->
       send_event(state, leader_pid, %AppendEntriesResponse{from: self, term: larger_term, success: false})
     end
@@ -456,10 +464,6 @@ defmodule RaftedValue.Server do
 
   defunp reset_heartbeat_timer(%State{leadership: leadership, config: config} = state) :: State.t do
     %State{state | leadership: Leadership.reset_heartbeat_timer(leadership, config)}
-  end
-
-  defunp cancel_heartbeat_timer(%State{leadership: leadership} = state) :: State.t do
-    %State{state | leadership: Leadership.cancel_heartbeat_timer(leadership)}
   end
 
   defunp reset_election_timer(%State{election: election, config: config} = state) :: State.t do

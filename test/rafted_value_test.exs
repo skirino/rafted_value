@@ -180,6 +180,15 @@ defmodule RaftedValueTest do
     assert RaftedValue.run_command(leader, :get) == {:ok, 3}
   end
 
+  test "1-member cluster should immediately respond to client requests" do
+    {leader, _} = make_cluster(0)
+    assert RaftedValue.run_command(leader, :inc) == {:ok, 0}
+    :timer.sleep(500) # should not step down after election timeout
+    assert RaftedValue.run_command(leader, :inc) == {:ok, 1}
+    :timer.sleep(500)
+    assert RaftedValue.run_command(leader, :inc) == {:ok, 2}
+  end
+
   test "3,4,5,6,7 member cluster should tolerate up to 1,1,2,2,3 follower failure" do
     [3, 4, 5, 6, 7] |> Enum.each(fn n_members ->
       {leader, followers} = make_cluster(n_members - 1)
@@ -196,7 +205,12 @@ defmodule RaftedValueTest do
       follower_threshold = Enum.random(followers -- followers_failing)
       assert :gen_fsm.stop(follower_threshold) == :ok
       assert_received({:EXIT, ^follower_threshold, :normal})
-      catch_exit RaftedValue.run_command(leader, :get, 300)
+      catch_exit RaftedValue.run_command(leader, :get, 100)
+
+      # leader should step down if it cannot reach quorum for a while
+      {:leader, _} = :sys.get_state(leader)
+      :timer.sleep(@conf.election_timeout * 2)
+      {:follower, _} = :sys.get_state(leader)
     end)
   end
 
