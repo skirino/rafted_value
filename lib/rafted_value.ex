@@ -37,12 +37,11 @@ defmodule RaftedValue do
     :gen_fsm.send_event(follower, :leave_and_stop)
   end
 
-  defun replace_leader(current_leader :: GenServer.server, new_leader :: g[pid]) :: :ok | {:error, atom} do
-    try do
-      :gen_fsm.sync_send_event(current_leader, {:replace_leader, new_leader})
-    catch
-      :exit, {a, _} when a in [:noproc, :normal] -> {:error, :noproc}
-    end
+  defun replace_leader(current_leader :: GenServer.server, new_leader :: nil | pid) :: :ok | {:error, atom} do
+    (current_leader, new_leader) when new_leader == nil or is_pid(new_leader) ->
+      catch_noproc(fn ->
+        :gen_fsm.sync_send_event(current_leader, {:replace_leader, new_leader})
+      end)
   end
 
   @type command_identifier :: reference | any
@@ -51,8 +50,14 @@ defmodule RaftedValue do
                     command_arg :: any,
                     timeout     :: timeout \\ 5000,
                     id          :: command_identifier \\ make_ref) :: {:ok, any} | {:error, atom} do
-    try do
+    catch_noproc(fn ->
       :gen_fsm.sync_send_event(leader, {:command, command_arg, id}, timeout)
+    end)
+  end
+
+  defp catch_noproc(f) do
+    try do
+      f.()
     catch
       :exit, {a, _} when a in [:noproc, :normal] -> {:error, :noproc}
     end
