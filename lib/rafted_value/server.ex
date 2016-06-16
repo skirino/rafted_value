@@ -30,6 +30,23 @@ defmodule RaftedValue.Server do
   #   - {:remove_follower, pid}
   #   - {:replace_leader, new_leader}
   #
+  # ## state transitions
+  #
+  # - :leader or :candidate => :follower, when newer term started
+  #   - in this case the incoming message that triggers the transition should be handled as a follower
+  #   - implemented in `become_follower_if_new_term_started`
+  # - :follower => :candidate, when election_timeout elapses
+  #   - implemented in `follower(:election_timeout, state)`
+  # - :candidate => :follower, when new leader found
+  #   - in this case the incoming message that triggers the transition should be handled as a follower
+  #   - implemented in `handle_append_entries_request`
+  # - :candidate => :leader, when majority agrees
+  #   - implemented in `candidate(%RequestVoteResponse{}, state)`
+  # - :leader => :follower, when stepping down to replace leader
+  #   - implemented in `leader(%AppendEntriesResponse{}, state)`
+  # - :leader => :follower, when election timeout elapses without getting responses from majority
+  #   - implemented in `leader(:cannot_reach_quorum, state)`
+  #
 
   alias RaftedValue.{TermNumber, PidSet, Members, Leadership, Election, Logs, CommandResults, Config}
   alias RaftedValue.RPC.{
