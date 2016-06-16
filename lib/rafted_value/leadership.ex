@@ -38,7 +38,7 @@ defmodule RaftedValue.Leadership do
                            follower :: pid,
                            config   :: Config.t) :: t do
     new_followers = PidSet.put(followers, follower)
-    if PidSet.size(new_followers) * 2 > PidSet.size(all) do
+    if (PidSet.size(new_followers) + 1) * 2 > PidSet.size(all) do
       reset_quorum_timer(l, config)
     else
       %__MODULE__{l | responding_followers: new_followers}

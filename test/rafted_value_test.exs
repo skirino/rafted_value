@@ -144,6 +144,8 @@ defmodule RaftedValueTest do
   test "replace_leader should eventually replace leader" do
     {leader, [follower1, follower2]} = make_cluster(2)
 
+    assert RaftedValue.replace_leader(leader, leader) == {:error, :already_leader}
+
     assert RaftedValue.replace_leader(leader, follower1) == :ok
     wait_until_state_name_changes(leader, :follower)
     wait_until_state_name_changes(follower1, :leader)
@@ -212,6 +214,11 @@ defmodule RaftedValueTest do
         assert_received({:EXIT, ^f, :normal})
         assert RaftedValue.run_command(leader, :get) == {:ok, 1}
       end)
+
+      # leader should not step down as long as it can access majority of members
+      {:leader, _} = :sys.get_state(leader)
+      :timer.sleep(@conf.election_timeout * 2)
+      {:leader, _} = :sys.get_state(leader)
 
       follower_threshold = Enum.random(followers -- followers_failing)
       assert :gen_fsm.stop(follower_threshold) == :ok
