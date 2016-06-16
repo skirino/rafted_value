@@ -346,14 +346,12 @@ defmodule RaftedValueTest do
     assert state.members.leader == nil
     assert state.election.voted_for == pid
     assert state.election.timer
-    refute state.leadership.heartbeat_timer
-    refute state.leadership.quorum_timer
+    refute state.leadership
   end
 
   defp assert_server_state_invariance(_pid, :follower, state) do
     assert state.election.timer
-    refute state.leadership.heartbeat_timer
-    refute state.leadership.quorum_timer
+    refute state.leadership
   end
 
   defp assert_equal_set(set1, set2) do

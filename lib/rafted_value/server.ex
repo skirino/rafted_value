@@ -45,7 +45,7 @@ defmodule RaftedValue.Server do
     use Croma.Struct, fields: [
       members:         Members,
       current_term:    TermNumber,
-      leadership:      Leadership,
+      leadership:      Croma.TypeGen.nilable(Leadership),
       election:        Election,
       logs:            Logs,
       data:            Croma.Any,      # replicated using raft logs (i.e. reproducible from logs)
@@ -92,7 +92,7 @@ defmodule RaftedValue.Server do
       call_add_server(known_members)
     logs = Logs.new_for_new_follower(last_entry)
     election = Election.new_for_follower(config)
-    state = %State{members: members, current_term: term, leadership: Leadership.new, election: election, logs: logs, data: data, command_results: command_results, config: config}
+    state = %State{members: members, current_term: term, election: election, logs: logs, data: data, command_results: command_results, config: config}
     {:ok, :follower, state}
   end
 
@@ -385,10 +385,10 @@ defmodule RaftedValue.Server do
 
   defunp convert_state_as_follower(%State{members: members, leadership: leadership, election: election, config: config} = state,
                                    new_term :: TermNumber.t) :: State.t do
-    new_members    = Members.put_leader(members, nil)
-    new_leadership = Leadership.deactivate(leadership)
-    new_election   = Election.replace_for_follower(election, config)
-    %State{state | members: new_members, current_term: new_term, leadership: new_leadership, election: new_election}
+    if leadership, do: Leadership.stop_timers(leadership)
+    new_members  = Members.put_leader(members, nil)
+    new_election = Election.replace_for_follower(election, config)
+    %State{state | members: new_members, current_term: new_term, leadership: nil, election: new_election}
   end
 
   #
