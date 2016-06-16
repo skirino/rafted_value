@@ -48,26 +48,29 @@ defmodule RaftedValue.Logs do
 
   defun make_append_entries_req(%__MODULE__{map: m, i_min: i_min, i_max: i_max, i_committed: i_c, followers: followers} = logs,
                                 term         :: TermNumber.t,
-                                follower_pid :: pid) :: {:ok, AppendEntriesRequest.t} | {:too_old, t} do
-    {i_next, _} = followers[follower_pid]
-    if i_next < i_min do
-      # this follower lags too behind (necessary logs are already discarded) => send whole data as snapshot
-      new_followers = Map.put(followers, follower_pid, {i_max + 1, 0})
-      {:too_old, %__MODULE__{logs | followers: new_followers}}
-    else
-      i_prev = i_next - 1
-      term_prev =
-        case m[i_prev] do
-          nil   -> 0
-          entry -> elem(entry, 0)
+                                follower_pid :: pid) :: {:ok, AppendEntriesRequest.t} | {:too_old, t} | :error do
+    case followers[follower_pid] do
+      nil         -> :error
+      {i_next, _} ->
+        if i_next < i_min do
+          # this follower lags too behind (necessary logs are already discarded) => send whole data as snapshot
+          new_followers = Map.put(followers, follower_pid, {i_max + 1, 0})
+          {:too_old, %__MODULE__{logs | followers: new_followers}}
+        else
+          i_prev = i_next - 1
+          term_prev =
+            case m[i_prev] do
+              nil   -> 0
+              entry -> elem(entry, 0)
+            end
+          %AppendEntriesRequest{
+            term:            term,
+            leader_pid:      self,
+            prev_log:        {term_prev, i_prev},
+            entries:         slice_entries(m, i_next, i_max),
+            i_leader_commit: i_c,
+          } |> R.pure
         end
-      %AppendEntriesRequest{
-        term:            term,
-        leader_pid:      self,
-        prev_log:        {term_prev, i_prev},
-        entries:         slice_entries(m, i_next, i_max),
-        i_leader_commit: i_c,
-      } |> R.pure
     end
   end
 
@@ -77,7 +80,9 @@ defmodule RaftedValue.Logs do
                            follower_pid :: pid,
                            i_replicated :: LogIndex.t,
                            config       :: Config.t) :: {t, [LogEntry.t]} do
-    new_followers = Map.put(followers, follower_pid, {i_replicated + 1, i_replicated})
+    new_followers =
+      Map.put(followers, follower_pid, {i_replicated + 1, i_replicated})
+      |> Map.take(PidSet.delete(members_set, self) |> PidSet.to_list) # in passing we remove outdated entries in `new_followers`
     new_logs      = %__MODULE__{logs | followers: new_followers} |> update_commit_index(current_term, members_set, config)
     applicable_entries = slice_entries(map, old_i_committed + 1, new_logs.i_committed)
     {new_logs, applicable_entries}
@@ -114,8 +119,10 @@ defmodule RaftedValue.Logs do
       follower_pids = members_set |> PidSet.delete(self) |> PidSet.to_list
       n_necessary_followers = div(length(follower_pids) + 1, 2)
       n_uptodate_followers = Enum.count(follower_pids, fn f ->
-        {_, i} = followers[f]
-        index <= i
+        case followers[f] do
+          {_, i} -> index <= i
+          nil    -> false
+        end
       end)
       n_necessary_followers <= n_uptodate_followers
     else
@@ -125,10 +132,13 @@ defmodule RaftedValue.Logs do
 
   defun decrement_next_index_of_follower(%__MODULE__{followers: followers} = logs,
                                          follower_pid :: pid) :: t do
-    {i_next_current, i_replicated} = followers[follower_pid]
-    i_next_decremented = i_next_current - 1
-    new_followers = Map.put(followers, follower_pid, {i_next_decremented, i_replicated})
-    %__MODULE__{logs | followers: new_followers}
+    case followers[follower_pid] do
+      nil                            -> logs # from already removed follower
+      {i_next_current, i_replicated} ->
+        i_next_decremented = i_next_current - 1
+        new_followers = Map.put(followers, follower_pid, {i_next_decremented, i_replicated})
+        %__MODULE__{logs | followers: new_followers}
+    end
   end
 
   defun add_entry(%__MODULE__{map: map, i_max: i_max} = logs, config :: Config.t, f :: (LogIndex.t -> LogEntry.t)) :: t do

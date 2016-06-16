@@ -49,4 +49,10 @@ defmodule RaftedValue.RPC do
       command_results:      CommandResults,
     ]
   end
+
+  defmodule TimeoutNow do
+    use Croma.Struct, fields: [
+      append_entries_req: AppendEntriesRequest,
+    ]
+  end
 end

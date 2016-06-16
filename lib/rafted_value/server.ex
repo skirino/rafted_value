@@ -17,9 +17,10 @@ defmodule RaftedValue.Server do
   #     - RequestVoteRequest
   #     - RequestVoteResponse
   #     - InstallSnapshot
+  #     - TimeoutNow
   #   - others
   #     - :heartbeat_timeout
-  #     - :election_timeout (also used as `TimeoutNow` when replacing leader)
+  #     - :election_timeout
   #     - :leave_and_stop
   #     - :remove_follower_completed
   #     - :cannot_reach_quorum
@@ -37,6 +38,7 @@ defmodule RaftedValue.Server do
     RequestVoteRequest,
     RequestVoteResponse,
     InstallSnapshot,
+    TimeoutNow,
   }
 
   defmodule State do
@@ -127,13 +129,15 @@ defmodule RaftedValue.Server do
         new_state2 = Enum.reduce(applicable_entries, new_state1, &leader_apply_committed_log_entry/2)
         case members do
           %Members{pending_leader_change: ^from} ->
-            if i_replicated == new_logs.i_max do
-              # now we know that the follower `from`'s logs are up-to-date; send `:election_timeout` to make it a new leader
-              send_event(new_state2, from, :election_timeout)
-              convert_state_as_follower(new_state2, current_term) |> next_state(:follower)
-            else
-              # try again at next `AppendEntriesResponse`
-              same_fsm_state(new_state2)
+            # now we know that the follower `from` is alive => make it a new leader
+            case Logs.make_append_entries_req(logs, current_term, from) do
+              {:ok, append_req} ->
+                req = %TimeoutNow{append_entries_req: append_req}
+                send_event(new_state2, from, req)
+                convert_state_as_follower(new_state2, current_term) |> next_state(:follower)
+              {:too_old, _} ->
+                # `from`'s logs lags too behind => try next time
+                same_fsm_state(new_state2)
             end
           _ -> same_fsm_state(new_state2)
         end
@@ -158,7 +162,7 @@ defmodule RaftedValue.Server do
   end
   def leader(%{__struct__: s} = rpc, state) when s == AppendEntriesRequest or s == RequestVoteResponse do
     become_follower_if_new_term_started(rpc, state, fn ->
-      same_fsm_state(state) # neglect `AppendEntriesRequest`, `RequestVoteResponse` for this term / older term
+      same_fsm_state(state) # neglect `AppendEntriesRequest`, `RequestVoteResponse`, `TimeoutNow` for this term / older term
     end)
   end
   def leader(_event, state) do
@@ -199,6 +203,7 @@ defmodule RaftedValue.Server do
   def leader({:replace_leader, new_leader},
              _from,
              %State{members: members} = state) do
+    # We don't immediately try to replace leader; instead we invoke replacement when receiving message from the target member
     case Members.start_replacing_leader(members, new_leader) do
       {:ok, new_members} -> %State{state | members: new_members} |> same_fsm_state_reply(:ok)
       {:error, _} = e    -> same_fsm_state_reply(state, e)
@@ -206,8 +211,9 @@ defmodule RaftedValue.Server do
   end
 
   def become_leader(%State{members: members, current_term: term, logs: logs, config: config} = state) do
+    leadership = Leadership.new_for_leader(config)
     new_logs = Logs.elected_leader(logs, members, term, config)
-    %State{state | members: Members.put_leader(members, self), logs: new_logs}
+    %State{state | members: Members.put_leader(members, self), leadership: leadership, logs: new_logs}
     |> broadcast_append_entries
     |> next_state(:leader)
   end
@@ -238,6 +244,9 @@ defmodule RaftedValue.Server do
         new_state = %State{state | logs: new_logs} # reset follower's next index
         send_event(new_state, follower, make_install_snapshot(new_state))
         new_state
+      :error ->
+        # `follower` is not included in `logs`; this indicates that `follower` is already removed => neglect
+        state
     end
   end
 
@@ -280,7 +289,7 @@ defmodule RaftedValue.Server do
     become_candidate_and_start_new_election(state)
   end
   def candidate(_event, state) do
-    same_fsm_state(state) # neglect `:heartbeat_timeout`, `:leave_and_stop`, `:remove_follower_completed`, `cannot_reach_quorum`, `InstallSnapshot`
+    same_fsm_state(state) # neglect `:heartbeat_timeout`, `:leave_and_stop`, `:remove_follower_completed`, `cannot_reach_quorum`, `InstallSnapshot`, `TimeoutNow`
   end
 
   def candidate(_event, _from, %State{members: members} = state) do
@@ -320,6 +329,20 @@ defmodule RaftedValue.Server do
   end
   def follower(:election_timeout, state) do
     become_candidate_and_start_new_election(state)
+  end
+  def follower(%TimeoutNow{append_entries_req: req},
+               %State{members: members, current_term: current_term, logs: logs, config: config} = state) do
+    %AppendEntriesRequest{term: term, prev_log: prev_log, entries: entries, i_leader_commit: i_leader_commit} = req
+    if term == current_term and Logs.contain_given_prev_log?(logs, prev_log) do
+      # catch up with the leader and then start election
+      {new_logs, new_members1, applicable_entries} = Logs.append_entries(logs, members, entries, i_leader_commit, config)
+      new_state1 = %State{state | members: new_members1, current_term: term, logs: new_logs}
+      new_state2 = Enum.reduce(applicable_entries, new_state1, &nonleader_apply_committed_log_entry/2)
+      become_candidate_and_start_new_election(new_state2)
+    else
+      # if condition is not met neglect the message
+      same_fsm_state(state)
+    end
   end
   def follower(:leave_and_stop, %State{members: members} = state) do
     new_state = cancel_election_timer(state)
@@ -372,7 +395,7 @@ defmodule RaftedValue.Server do
   # common handler implementations
   #
   defp handle_append_entries_request(%AppendEntriesRequest{term: term, leader_pid: leader_pid, prev_log: prev_log,
-                                                                     entries: entries, i_leader_commit: i_leader_commit},
+                                                           entries: entries, i_leader_commit: i_leader_commit},
                                      %State{members: members, current_term: current_term, logs: logs, config: config} = state,
                                      current_state_name) do
     reply_as_failure = fn larger_term ->
