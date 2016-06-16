@@ -52,8 +52,7 @@ defmodule RaftedValueTest do
   defp wait_until_someone_elected_leader(members) do
     :timer.sleep(100)
     leader = Enum.find(members, fn m ->
-      state = :sys.get_state(m)
-      match?({:leader, _}, state)
+      match?({:leader, _}, :sys.get_state(m))
     end)
     if leader do
       leader
@@ -247,7 +246,7 @@ defmodule RaftedValueTest do
 
     send(leader, :info_message)
     assert :gen_fsm.send_all_state_event(leader, :foo) == :ok
-    {all, l} = :gen_fsm.sync_send_all_state_event(leader, :foo)
+    %{members: all, leader: l} = RaftedValue.status(leader)
     assert Enum.sort(all) == Enum.sort([leader | followers])
     assert l == leader
     assert Process.alive?(leader)
@@ -490,7 +489,7 @@ defmodule RaftedValueTest do
     else
       :timer.sleep(100)
       Enum.find_value(members, fn m ->
-        {_, leader} = :gen_fsm.sync_send_all_state_event(m, :members)
+        %{leader: leader} = RaftedValue.status(m)
         leader
       end) || find_leader(members, n - 1)
     end

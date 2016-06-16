@@ -452,10 +452,17 @@ defmodule RaftedValue.Server do
     next_state(state, state_name)
   end
 
-  def handle_sync_event(_event, _from, state_name, %State{members: members} = state) do
-    leader = members.leader
-    members = PidSet.to_list(members.all)
-    {:reply, {members, leader}, state_name, state}
+  def handle_sync_event(_event, _from, state_name, %State{members: members, current_term: current_term, leadership: leadership, config: config} = state) do
+    unresponsive_followers = if state_name == :leader, do: Leadership.unresponsive_followers(leadership, config), else: []
+    result = %{
+      members:                PidSet.to_list(members.all),
+      leader:                 members.leader,
+      unresponsive_followers: unresponsive_followers,
+      current_term:           current_term,
+      state_name:             state_name,
+      config:                 config,
+    }
+    {:reply, result, state_name, state}
   end
 
   def handle_info(_info, state_name, state) do

@@ -1,7 +1,7 @@
 use Croma
 
 defmodule RaftedValue do
-  alias RaftedValue.{Config, Server, ServerId}
+  alias RaftedValue.{TermNumber, Config, Server, ServerId}
 
   @type consensus_group_info :: {:create_new_consensus_group, Config.t} | {:join_existing_consensus_group, [ServerId.t]}
 
@@ -20,6 +20,17 @@ defmodule RaftedValue do
     else
       :gen_fsm.start_link(Server, info, [])
     end
+  end
+
+  defun make_config(data_ops_module :: g[atom], opts :: Keyword.t(any) \\ []) :: Config.t do
+    %Config{
+      data_ops_module:              data_ops_module,
+      communication_module:         Keyword.get(opts, :communication_module        , :gen_fsm),
+      heartbeat_timeout:            Keyword.get(opts, :heartbeat_timeout           , 200),
+      election_timeout:             Keyword.get(opts, :election_timeout            , 1000),
+      max_retained_committed_logs:  Keyword.get(opts, :max_retained_committed_logs , 100),
+      max_retained_command_results: Keyword.get(opts, :max_retained_command_results, 100),
+    } |> Config.validate!
   end
 
   defun leave_consensus_group_and_stop(follower :: GenServer.server) :: :ok do
@@ -47,14 +58,16 @@ defmodule RaftedValue do
     end
   end
 
-  defun make_config(data_ops_module :: g[atom], opts :: Keyword.t(any) \\ []) :: Config.t do
-    %Config{
-      data_ops_module:              data_ops_module,
-      communication_module:         Keyword.get(opts, :communication_module        , :gen_fsm),
-      heartbeat_timeout:            Keyword.get(opts, :heartbeat_timeout           , 200),
-      election_timeout:             Keyword.get(opts, :election_timeout            , 1000),
-      max_retained_committed_logs:  Keyword.get(opts, :max_retained_committed_logs , 100),
-      max_retained_command_results: Keyword.get(opts, :max_retained_command_results, 100),
-    } |> Config.validate!
+  @type status_result :: %{
+    members:                [pid],
+    leader:                 nil | pid,
+    unresponsive_followers: [pid],
+    current_term:           TermNumber.t,
+    state_name:             :leader | :candidate | :follower,
+    config:                 Config.t,
+  }
+
+  defun status(server :: GenServer.server) :: status_result do
+    :gen_fsm.sync_send_all_state_event(server, :status)
   end
 end
