@@ -282,13 +282,19 @@ defmodule RaftedValueTest do
   end
 
   defp run_command(members, cmd) do
-    ref = make_ref
-    case run_command(members, members, cmd, ref) do
-      nil ->
-        # no leader found. wait for leader election finishes and try once more
-        :timer.sleep(1000)
-        run_command(members, members, cmd, ref)
-      r -> r
+    run_command_with_retry(members, cmd, make_ref, 5)
+  end
+
+  defp run_command_with_retry(members, cmd, ref, n) do
+    if n == 0 do
+      raise "No leader found! Something is wrong!"
+    else
+      case run_command(members, members, cmd, ref) do
+        nil ->
+          :timer.sleep(300)
+          run_command_with_retry(members, cmd, ref, n - 1)
+        r -> r
+      end
     end
   end
 
@@ -404,7 +410,7 @@ defmodule RaftedValueTest do
     n_isolated = length(isolated)
     n_all      = n_working + n_killed + n_isolated
     [
-#      :op_replace_leader,
+      :op_replace_leader,
       (if n_all < 7   , do: :op_add_follower       ),
       (if n_all > 3   , do: :op_remove_follower    ),
       (if n_all > 3   , do: :op_kill_member        ),
@@ -505,9 +511,10 @@ defmodule RaftedValueTest do
         c2
       end)
 
-    refute_receive({:EXIT, ^client_pid, _})
+    :timer.sleep(100)
+    refute_received({:EXIT, ^client_pid, _})
     send(client_pid, :finish)
-    assert_receive({:EXIT, ^client_pid, :normal})
+    assert_receive({:EXIT, ^client_pid, :normal}, 1000)
     :timer.sleep(250)
 
     surviving_members = new_context.working

@@ -130,7 +130,7 @@ defmodule RaftedValue.Server do
         case members do
           %Members{pending_leader_change: ^from} ->
             # now we know that the follower `from` is alive => make it a new leader
-            case Logs.make_append_entries_req(logs, current_term, from) do
+            case Logs.make_append_entries_req(new_logs, current_term, from) do
               {:ok, append_req} ->
                 req = %TimeoutNow{append_entries_req: append_req}
                 send_event(new_state2, from, req)
@@ -336,7 +336,7 @@ defmodule RaftedValue.Server do
     if term == current_term and Logs.contain_given_prev_log?(logs, prev_log) do
       # catch up with the leader and then start election
       {new_logs, new_members1, applicable_entries} = Logs.append_entries(logs, members, entries, i_leader_commit, config)
-      new_state1 = %State{state | members: new_members1, current_term: term, logs: new_logs}
+      new_state1 = %State{state | members: new_members1, logs: new_logs}
       new_state2 = Enum.reduce(applicable_entries, new_state1, &nonleader_apply_committed_log_entry/2)
       become_candidate_and_start_new_election(new_state2)
     else
