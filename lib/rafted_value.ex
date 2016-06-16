@@ -27,13 +27,21 @@ defmodule RaftedValue do
   end
 
   defun replace_leader(current_leader :: GenServer.server, new_leader :: g[pid]) :: :ok | {:error, atom} do
-    :gen_fsm.sync_send_event(current_leader, {:replace_leader, new_leader})
+    try do
+      :gen_fsm.sync_send_event(current_leader, {:replace_leader, new_leader})
+    catch
+      :exit, {a, _} when a in [:noproc, :normal] -> {:error, :noproc}
+    end
   end
 
   @type command_identifier :: reference | any
 
   defun run_command(leader :: GenServer.server, command_arg :: any, timeout :: timeout \\ 5000, id :: command_identifier \\ make_ref) :: {:ok, any} | {:error, atom} do
-    :gen_fsm.sync_send_event(leader, {:command, command_arg, id}, timeout)
+    try do
+      :gen_fsm.sync_send_event(leader, {:command, command_arg, id}, timeout)
+    catch
+      :exit, {a, _} when a in [:noproc, :normal] -> {:error, :noproc}
+    end
   end
 
   defun make_config(data_ops_module :: g[atom], opts :: Keyword.t(any) \\ []) :: Config.t do
