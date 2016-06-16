@@ -61,6 +61,12 @@ defmodule RaftedValueTest do
     end
   end
 
+  def simulate_send_sync_event(dest, event) do
+    ref = make_ref
+    send(dest, {:"$gen_sync_event", {self, ref}, event})
+    ref
+  end
+
   setup do
     Process.flag(:trap_exit, true)
     :ok
@@ -94,35 +100,48 @@ defmodule RaftedValueTest do
 
   test "should not concurrently execute multiple membership changes" do
     {:ok, leader} = RaftedValue.start_link({:create_new_consensus_group, @conf})
-    follower1 = add_follower(leader)
+    _follower1 = add_follower(leader)
 
-    simulate_send_sync_event = fn(event) ->
-      ref = make_ref
-      send(leader, {:"$gen_sync_event", {self, ref}, event})
-      ref
-    end
-
-    ref1 = simulate_send_sync_event.({:add_follower, self})
-    ref2 = simulate_send_sync_event.({:add_follower, self})
+    ref1 = simulate_send_sync_event(leader, {:add_follower, self})
+    ref2 = simulate_send_sync_event(leader, {:add_follower, self})
     assert_receive({^ref1, {:ok, %RaftedValue.RPC.InstallSnapshot{}}})
     assert_receive({^ref2, {:error, :uncommitted_membership_change}})
 
     wait_until_member_change_completes(leader)
 
-    ref1 = simulate_send_sync_event.({:remove_follower, self})
-    ref2 = simulate_send_sync_event.({:remove_follower, self})
+    ref1 = simulate_send_sync_event(leader, {:remove_follower, self})
+    ref2 = simulate_send_sync_event(leader, {:remove_follower, self})
     assert_receive({^ref1, :ok})
     assert_receive({^ref2, {:error, :uncommitted_membership_change}})
 
     wait_until_member_change_completes(leader)
+  end
 
-    ref1 = simulate_send_sync_event.({:replace_leader, follower1})
-    ref2 = simulate_send_sync_event.({:replace_leader, follower1})
+  test "latter replace_leader message should override former one" do
+    {leader, [follower1, follower2]} = make_cluster(2)
+
+    ref1 = simulate_send_sync_event(leader, {:replace_leader, follower1})
+    ref2 = simulate_send_sync_event(leader, {:replace_leader, follower2})
     assert_receive({^ref1, :ok})
-    assert_receive({^ref2, {:error, :pending_leader_change}})
+    assert_receive({^ref2, :ok})
 
     wait_until_state_name_changes(leader, :follower)
-    wait_until_state_name_changes(follower1, :leader)
+    wait_until_state_name_changes(follower2, :leader)
+    {:follower, _} = :sys.get_state(follower1)
+  end
+
+  test "replace_leader should cancel previous call by passing nil" do
+    {leader, [follower1, follower2]} = make_cluster(2)
+
+    ref1 = simulate_send_sync_event(leader, {:replace_leader, follower1})
+    ref2 = simulate_send_sync_event(leader, {:replace_leader, nil})
+    assert_receive({^ref1, :ok})
+    assert_receive({^ref2, :ok})
+
+    :timer.sleep(1000)
+    {:leader  , _} = :sys.get_state(leader)
+    {:follower, _} = :sys.get_state(follower1)
+    {:follower, _} = :sys.get_state(follower2)
   end
 
   test "should report error when trying to add already joined member" do
@@ -325,6 +344,7 @@ defmodule RaftedValueTest do
 
   defp assert_server_state_invariance(pid, :leader, state) do
     assert state.members.leader == pid
+    assert is_nil(state.members.uncommitted_membership_change) or is_nil(state.members.pending_leader_change)
     assert state.election.voted_for == pid
     refute state.election.timer
     assert state.leadership.heartbeat_timer

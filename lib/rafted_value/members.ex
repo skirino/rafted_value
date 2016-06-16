@@ -21,59 +21,61 @@ defmodule RaftedValue.Members do
   end
 
   defun put_leader(m :: t, leader_or_nil :: nil | pid) :: t do
-    # when resetting `leader`, `pending_leader_change field` should be discarded (if any)
+    # when resetting `leader`, `pending_leader_change` field should be discarded (if any)
     %__MODULE__{m | leader: leader_or_nil, pending_leader_change: nil}
   end
 
   defun start_adding_follower(%__MODULE__{all: all} = m,
                               {_term, _index, :add_follower, new_follower} = entry) :: R.t(t) do
-    reject_if_change_ongoing(m, fn ->
-      if PidSet.member?(all, new_follower) do
-        {:error, :already_joined}
-      else
-        %__MODULE__{m | all: PidSet.put(all, new_follower), uncommitted_membership_change: entry} |> R.pure
-      end
+    reject_if_membership_changing(m, fn ->
+      reject_if_leader_changing(m, fn ->
+        if PidSet.member?(all, new_follower) do
+          {:error, :already_joined}
+        else
+          %__MODULE__{m | all: PidSet.put(all, new_follower), uncommitted_membership_change: entry} |> R.pure
+        end
+      end)
     end)
   end
 
   defun start_removing_follower(%__MODULE__{all: all} = m,
                                 {_term, _index, :remove_follower, old_follower} = entry) :: R.t(t) do
-    if old_follower == self do
-      {:error, :cannot_remove_leader}
-    else
-      reject_if_change_ongoing(m, fn ->
-        if PidSet.member?(all, old_follower) do
-          %__MODULE__{m | all: PidSet.delete(all, old_follower), uncommitted_membership_change: entry} |> R.pure
-        else
-          {:error, :not_member}
+    reject_if_membership_changing(m, fn ->
+      reject_if_leader_changing(m, fn ->
+        cond do
+          old_follower == self              -> {:error, :cannot_remove_leader}
+          PidSet.member?(all, old_follower) -> %__MODULE__{m | all: PidSet.delete(all, old_follower), uncommitted_membership_change: entry} |> R.pure
+          true                              -> {:error, :not_member}
         end
       end)
-    end
+    end)
   end
 
-  defun start_replacing_leader(%__MODULE__{all: all} = m, new_leader :: pid) :: R.t(t) do
-    if new_leader == self do
-      {:error, :already_leader}
-    else
-      reject_if_change_ongoing(m, fn ->
-        if PidSet.member?(all, new_leader) do
-          %__MODULE__{m | pending_leader_change: new_leader} |> R.pure
-        else
-          {:error, :not_member}
-        end
-      end)
-    end
+  defun start_replacing_leader(%__MODULE__{all: all} = m,
+                               new_leader :: nil | pid) :: R.t(t) do
+    reject_if_membership_changing(m, fn ->
+      cond do
+        is_nil(new_leader)              -> %__MODULE__{m | pending_leader_change: nil} |> R.pure
+        new_leader == self              -> {:error, :already_leader}
+        PidSet.member?(all, new_leader) -> %__MODULE__{m | pending_leader_change: new_leader} |> R.pure
+        true                            -> {:error, :not_member}
+      end
+    end)
   end
 
-  defunp reject_if_change_ongoing(%__MODULE__{uncommitted_membership_change: c1, pending_leader_change: c2}, f :: (() -> any)) :: any do
-    if c1 do
+  defp reject_if_membership_changing(%__MODULE__{uncommitted_membership_change: change}, f) do
+    if change do
       {:error, :uncommitted_membership_change}
     else
-      if c2 do
-        {:error, :pending_leader_change}
-      else
-        f.()
-      end
+      f.()
+    end
+  end
+
+  defp reject_if_leader_changing(%__MODULE__{pending_leader_change: change}, f) do
+    if change do
+      {:error, :pending_leader_change}
+    else
+      f.()
     end
   end
 
