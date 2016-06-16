@@ -16,7 +16,7 @@ defmodule RaftedValue.Mixfile do
       package:         package,
       source_url:      @github_url,
       homepage_url:    @github_url,
-      test_coverage:   [tool: Coverex.Task]
+      test_coverage:   [tool: Coverex.Task, coveralls: true],
     ]
   end
 
