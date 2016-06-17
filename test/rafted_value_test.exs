@@ -294,18 +294,27 @@ defmodule RaftedValueTest do
   #
   # property-based tests
   #
-  defp client_process_loop(members, value) do
+  defp client_process_loop(members, value, pending_cmd_tuple \\ nil) do
     receive do
-      {:members, current_members} -> client_process_loop(current_members, value)
-      :finish                     -> :ok
+      {:members, new_members} -> client_process_loop(new_members, value, pending_cmd_tuple)
+      :finish                 -> :ok
     after
-      0 ->
-        cmd = pick_command
-        {expected_ret, new_value} = I.command(value, cmd)
-        new_members1 = Enum.filter(members, &Process.alive?/1)
-        {ret, new_members2} = run_command(new_members1, cmd)
-        assert ret == expected_ret
-        client_process_loop(new_members2, new_value)
+      5 ->
+        {cmd, ref, tries} =
+          case pending_cmd_tuple do
+            nil                  -> {pick_command, make_ref, 20}
+            {_cmd, _ref, 0}      -> raise "No leader found, something is wrong!"
+            {_cmd, _ref, _tries} -> pending_cmd_tuple
+          end
+        case run_command(members, cmd, ref) do
+          {:ok, ret} ->
+            {expected_ret, new_value} = I.command(value, cmd)
+            assert ret == expected_ret
+            client_process_loop(members, new_value)
+          :error ->
+            :timer.sleep(200)
+            client_process_loop(members, value, {cmd, ref, tries - 1})
+        end
     end
   end
 
@@ -317,33 +326,15 @@ defmodule RaftedValueTest do
     ])
   end
 
-  defp run_command(members, cmd) do
-    run_command_with_retry(members, cmd, make_ref, 5)
-  end
-
-  defp run_command_with_retry(members, cmd, ref, n) do
-    if n == 0 do
-      raise "No leader found! Something is wrong!"
-    else
-      case run_command(members, members, cmd, ref) do
-        nil ->
-          :timer.sleep(300)
-          run_command_with_retry(members, cmd, ref, n - 1)
-        r -> r
-      end
-    end
-  end
-
-  defp run_command([], _, _, _), do: nil
-  defp run_command([member | members], all, cmd, ref) do
-    case RaftedValue.run_command(member, cmd, 1000, ref) do
-      {:ok, ret} -> {ret, all}
+  defp run_command([], _cmd, _ref), do: :error
+  defp run_command([member | members], cmd, ref) do
+    case RaftedValue.run_command(member, cmd, 500, ref) do
+      {:ok, ret} -> {:ok, ret}
       {:error, {:not_leader, leader}} when is_pid(leader) ->
-        new_all        = [leader | Enum.reject(all    , &(&1 == leader))]
         members_to_ask = [leader | Enum.reject(members, &(&1 == leader))]
-        run_command(members_to_ask, new_all, cmd, ref)
+        run_command(members_to_ask, cmd, ref)
       {:error, _} ->
-        run_command(members, all, cmd, ref)
+        run_command(members, cmd, ref)
     end
   end
 
@@ -455,7 +446,7 @@ defmodule RaftedValueTest do
     followers_in_majority = List.delete(working, leader)
     next_leader = Enum.random(followers_in_majority)
     assert RaftedValue.replace_leader(leader, next_leader) == :ok
-    assert_receive({:elected, new_leader}, @t_max_election_timeout)
+    new_leader = receive_leader_elected_message || raise "leader should be elected"
     %{context | current_leader: new_leader}
   end
 
@@ -498,8 +489,7 @@ defmodule RaftedValueTest do
       assert_receive({:EXIT, ^target, :normal})
       new_context = %{context | working: List.delete(working, target), killed: [target | killed], isolated: List.delete(isolated, target)}
       if target == leader do
-        assert_receive({:elected, new_leader}, @t_max_election_timeout)
-        %{new_context | current_leader: new_leader}
+        %{new_context | current_leader: receive_leader_elected_message}
       else
         new_context
       end
@@ -510,7 +500,8 @@ defmodule RaftedValueTest do
 
   def op_purge_killed_member(%{current_leader: leader, killed: killed} = context) do
     target = Enum.random(killed)
-    assert :gen_fsm.sync_send_event(leader, {:remove_follower, target}) == :ok
+    assert RaftedValue.remove_follower(leader, target) == :ok
+    assert_receive({:follower_removed, ^target}, @t_max_election_timeout)
     %{context | killed: List.delete(killed, target)}
   end
 
@@ -520,6 +511,31 @@ defmodule RaftedValueTest do
     def on_follower_added(pid)          , do: send(:test_runner, {:follower_added, pid})
     def on_follower_removed(pid)        , do: send(:test_runner, {:follower_removed, pid})
     def on_elected                      , do: send(:test_runner, {:elected, self})
+  end
+
+  defp receive_leader_elected_message do
+    receive do
+      {:elected, pid} -> pid
+    after
+      @t_max_election_timeout * 2 -> nil
+    end
+  end
+
+  defp finish_client_process(client_pid) do
+    :timer.sleep(100)
+    refute_received({:EXIT, ^client_pid, _})
+    send(client_pid, :finish)
+    assert_receive({:EXIT, ^client_pid, :normal}, 1000)
+  end
+
+  defp assert_all_members_up_to_date(context) do
+    :timer.sleep(250)
+    indices = Enum.map(context.working, fn m ->
+      {_, state} = :sys.get_state(m)
+      assert state.logs.i_committed == state.logs.i_max
+      state.logs.i_max
+    end)
+    assert length(Enum.uniq(indices)) == 1
   end
 
   test "3,4,5,6,7-member cluster should maintain invariance and keep responsive in the face of minority failure" do
@@ -543,19 +559,95 @@ defmodule RaftedValueTest do
         c2
       end)
 
-    :timer.sleep(100)
-    refute_received({:EXIT, ^client_pid, _})
-    send(client_pid, :finish)
-    assert_receive({:EXIT, ^client_pid, :normal}, 1000)
-    :timer.sleep(250)
+    finish_client_process(client_pid)
+    assert_all_members_up_to_date(new_context)
+  end
 
-    surviving_members = new_context.working
-    indices =
-      Enum.map(surviving_members, fn m ->
-        {_, state} = :sys.get_state(m)
-        assert state.logs.i_committed == state.logs.i_max
-        state.logs.i_max
+  defmodule CommunicationWithNetsplit do
+    def start do
+      Agent.start_link(fn -> [] end, name: __MODULE__)
+    end
+
+    def set(pids) do
+      Agent.update(__MODULE__, fn _ -> pids end)
+    end
+
+    defp reachable?(to) do
+      isolated = Agent.get(__MODULE__, fn l -> l end)
+      !(self in isolated) and !(to in isolated)
+    end
+
+    def send_event(server, event) do
+      if reachable?(server) do
+        :gen_fsm.send_event(server, event)
+      else
+        :ok
+      end
+    end
+
+    def reply({to, _} = from, reply) do
+      if reachable?(to) do
+        :gen_fsm.reply(from, reply)
+      else
+        :ok
+      end
+    end
+  end
+
+  test "3,4,5,6,7-member cluster should maintain invariance and keep responsive during non-critical netsplit" do
+    Process.register(self, :test_runner)
+    CommunicationWithNetsplit.start
+    config =
+      @conf
+      |> Map.put(:leader_hook_module, MessageSendingHook)
+      |> Map.put(:communication_module, CommunicationWithNetsplit)
+    {leader, [follower1, follower2]} = make_cluster(2, config)
+    assert_received({:follower_added, ^follower1})
+    assert_received({:follower_added, ^follower2})
+
+    members = [leader, follower1, follower2]
+    context =
+      %{working: members, killed: [], isolated: [], current_leader: leader, leaders: %{}, term_numbers: %{}, commit_indices: %{}, data: %{}}
+      |> assert_invariances
+    client_pid = spawn_link(fn -> client_process_loop(members, I.new) end)
+
+    new_context =
+      Enum.reduce(1 .. 10, context, fn(_, c1) ->
+        assert c1.isolated == []
+        assert c1.killed   == []
+
+        # cause netsplit
+        n_isolated = :rand.uniform(div(length(c1.working) - 1, 2))
+        isolated = Enum.take_random(c1.working, n_isolated)
+        working_after_split  = c1.working -- isolated
+        send(client_pid, {:members, working_after_split})
+        CommunicationWithNetsplit.set(isolated)
+        leader_after_netsplit =
+          if c1.current_leader in isolated do
+            receive_leader_elected_message || receive_leader_elected_message || raise "no leader!!!"
+          else
+            c1.current_leader
+          end
+        c2 = %{c1 | working: working_after_split, isolated: isolated, current_leader: leader_after_netsplit}
+
+        c5 =
+          Enum.reduce(1 .. 5, c2, fn(_, c3) ->
+            op = pick_operation(c3)
+            c4 = apply(__MODULE__, op, [c3]) |> assert_invariances
+            send(client_pid, {:members, c4.working})
+            c4
+          end)
+
+        # cleanup: recover from netsplit, find new leader, purge killed
+        working_after_heal = c5.working ++ c5.isolated
+        send(client_pid, {:members, working_after_heal})
+        CommunicationWithNetsplit.set([])
+        leader_after_heal = receive_leader_elected_message || c5.current_leader
+        c6 = %{c5 | working: working_after_heal, isolated: [], current_leader: leader_after_heal}
+        Enum.reduce(c6.killed, c6, fn(_, c) -> op_purge_killed_member(c) end)
       end)
-    assert length(Enum.uniq(indices)) == 1
+
+    finish_client_process(client_pid)
+    assert_all_members_up_to_date(new_context)
   end
 end
