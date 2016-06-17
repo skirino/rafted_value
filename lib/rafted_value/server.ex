@@ -222,11 +222,16 @@ defmodule RaftedValue.Server do
   end
   def leader({:replace_leader, new_leader},
              _from,
-             %State{members: members} = state) do
+             %State{members: members, leadership: leadership, config: config} = state) do
     # We don't immediately try to replace leader; instead we invoke replacement when receiving message from the target member
     case Members.start_replacing_leader(members, new_leader) do
-      {:ok, new_members} -> %State{state | members: new_members} |> same_fsm_state_reply(:ok)
       {:error, _} = e    -> same_fsm_state_reply(state, e)
+      {:ok, new_members} ->
+        if new_leader in Leadership.unresponsive_followers(leadership, config) do
+          same_fsm_state_reply(state, {:error, :new_leader_unresponsive})
+        else
+          %State{state | members: new_members} |> same_fsm_state_reply(:ok)
+        end
     end
   end
 

@@ -181,6 +181,13 @@ defmodule RaftedValueTest do
     {:follower, _} = :sys.get_state(follower2)
   end
 
+  test "replace_leader should reject change to unhealthy follower" do
+    {leader, [follower1, _]} = make_cluster(2)
+    assert :gen_fsm.stop(follower1) == :ok
+    :timer.sleep(1000)
+    assert RaftedValue.replace_leader(leader, follower1) == {:error, :new_leader_unresponsive}
+  end
+
   test "leader should respond to client requests" do
     {leader, [follower1, follower2]} = make_cluster(2)
 
