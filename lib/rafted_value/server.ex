@@ -21,7 +21,6 @@ defmodule RaftedValue.Server do
   #   - others
   #     - :heartbeat_timeout
   #     - :election_timeout
-  #     - :leave_and_stop
   #     - :remove_follower_completed
   #     - :cannot_reach_quorum
   # - sync
@@ -183,7 +182,7 @@ defmodule RaftedValue.Server do
     end)
   end
   def leader(_event, state) do
-    same_fsm_state(state) # leader neglects `:election_timeout`, `:leave_and_stop`, `:remove_follower_completed`, `InstallSnapshot`
+    same_fsm_state(state) # leader neglects `:election_timeout`, `:remove_follower_completed`, `InstallSnapshot`
   end
 
   def leader({:command, arg, cmd_id}, from, %State{current_term: term, logs: logs, config: config} = state) do
@@ -306,7 +305,7 @@ defmodule RaftedValue.Server do
     become_candidate_and_start_new_election(state)
   end
   def candidate(_event, state) do
-    same_fsm_state(state) # neglect `:heartbeat_timeout`, `:leave_and_stop`, `:remove_follower_completed`, `cannot_reach_quorum`, `InstallSnapshot`, `TimeoutNow`
+    same_fsm_state(state) # neglect `:heartbeat_timeout`, `:remove_follower_completed`, `cannot_reach_quorum`, `InstallSnapshot`, `TimeoutNow`
   end
 
   def candidate(_event, _from, %State{members: members} = state) do
@@ -360,11 +359,6 @@ defmodule RaftedValue.Server do
       # if condition is not met neglect the message
       same_fsm_state(state)
     end
-  end
-  def follower(:leave_and_stop, %State{members: members} = state) do
-    new_state = cancel_election_timer(state)
-    _ = :gen_fsm.sync_send_event(members.leader, {:remove_follower, self})
-    same_fsm_state(new_state)
   end
   def follower(:remove_follower_completed, state) do
     {:stop, :normal, state}
@@ -513,17 +507,13 @@ defmodule RaftedValue.Server do
     %State{state | election: Election.reset_timer(election, config)}
   end
 
-  defunp cancel_election_timer(%State{election: election} = state) :: State.t do
-    %State{state | election: Election.cancel_timer(election)}
-  end
-
   defunp leader_apply_committed_log_entry(entry :: LogEntry.t, %State{members: members, logs: logs} = state) :: State.t do
     case entry do
       {_term, _index, :command        , tuple        } -> run_command(state, tuple, true)
       {_term, _index, :leader_elected , _leader_pid  } -> state
       {_term, index , :add_follower   , _follower_pid} -> %State{state | members: Members.membership_change_committed(members, index)}
       {_term, index , :remove_follower, follower_pid } ->
-        send_event(state, follower_pid, :remove_follower_completed)
+        send_event(state, follower_pid, :remove_follower_completed) # don't use :gen_fsm.stop in order to stop `follower_pid` only when it's actually a follower
         new_logs = Logs.forget_about_follower(logs, follower_pid)
         %State{state | members: Members.membership_change_committed(members, index), logs: new_logs}
     end

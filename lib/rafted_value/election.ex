@@ -50,7 +50,7 @@ defmodule RaftedValue.Election do
     %__MODULE__{e | timer: start_timer(config)}
   end
 
-  defun cancel_timer(%__MODULE__{timer: timer} = e) :: t do
+  defunp cancel_timer(%__MODULE__{timer: timer} = e) :: t do
     if timer do
       :gen_fsm.cancel_timer(timer)
       %__MODULE__{e | timer: nil}

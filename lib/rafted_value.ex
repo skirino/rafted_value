@@ -33,8 +33,8 @@ defmodule RaftedValue do
     } |> Config.validate!
   end
 
-  defun leave_consensus_group_and_stop(follower :: GenServer.server) :: :ok do
-    :gen_fsm.send_event(follower, :leave_and_stop)
+  defun remove_follower(leader :: GenServer.server, follower_pid :: g[pid]) :: :ok | {:error, atom} do
+    :gen_fsm.sync_send_event(leader, {:remove_follower, follower_pid})
   end
 
   defun replace_leader(current_leader :: GenServer.server, new_leader :: nil | pid) :: :ok | {:error, atom} do
