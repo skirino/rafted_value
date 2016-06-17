@@ -1,9 +1,9 @@
 use Croma
 
 defmodule RaftedValue do
-  alias RaftedValue.{TermNumber, Config, Server, ServerId}
+  alias RaftedValue.{TermNumber, Config, Server}
 
-  @type consensus_group_info :: {:create_new_consensus_group, Config.t} | {:join_existing_consensus_group, [ServerId.t]}
+  @type consensus_group_info :: {:create_new_consensus_group, Config.t} | {:join_existing_consensus_group, [GenServer.server]}
 
   defun start_link(info :: consensus_group_info, name_or_nil :: g[atom] \\ nil) :: GenServer.on_start do
     case info do

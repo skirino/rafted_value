@@ -18,6 +18,8 @@ defmodule RaftedValueTest do
     election_timeout:             500,
   ])
 
+  @t_max_election_timeout @conf.election_timeout * 2
+
   defp wait_until_member_change_completes(leader) do
     :timer.sleep(10)
     {:leader, state} = :sys.get_state(leader)
@@ -50,7 +52,7 @@ defmodule RaftedValueTest do
   end
 
   defp wait_until_someone_elected_leader(members) do
-    :timer.sleep(100)
+    :timer.sleep(10)
     leader = Enum.find(members, fn m ->
       match?({:leader, _}, :sys.get_state(m))
     end)
@@ -132,7 +134,7 @@ defmodule RaftedValueTest do
   test "should refuse to remove healthy follower if it breaks the current quorum" do
     {leader, [follower1, follower2]} = make_cluster(2)
     assert :gen_fsm.stop(follower1) == :ok
-    :timer.sleep(1000)
+    :timer.sleep(@t_max_election_timeout)
     assert RaftedValue.remove_follower(leader, follower2) == {:error, :will_break_quorum}
   end
 
@@ -175,7 +177,7 @@ defmodule RaftedValueTest do
     assert_receive({^ref1, :ok})
     assert_receive({^ref2, :ok})
 
-    :timer.sleep(1000)
+    :timer.sleep(10)
     {:leader  , _} = :sys.get_state(leader)
     {:follower, _} = :sys.get_state(follower1)
     {:follower, _} = :sys.get_state(follower2)
@@ -184,7 +186,7 @@ defmodule RaftedValueTest do
   test "replace_leader should reject change to unhealthy follower" do
     {leader, [follower1, _]} = make_cluster(2)
     assert :gen_fsm.stop(follower1) == :ok
-    :timer.sleep(1000)
+    :timer.sleep(@t_max_election_timeout)
     assert RaftedValue.replace_leader(leader, follower1) == {:error, :new_leader_unresponsive}
   end
 
@@ -225,9 +227,9 @@ defmodule RaftedValueTest do
   test "1-member cluster should immediately respond to client requests" do
     {leader, _} = make_cluster(0)
     assert RaftedValue.run_command(leader, :inc) == {:ok, 0}
-    :timer.sleep(500) # should not step down after election timeout
+    :timer.sleep(@conf.election_timeout) # should not step down after election timeout
     assert RaftedValue.run_command(leader, :inc) == {:ok, 1}
-    :timer.sleep(500)
+    :timer.sleep(@conf.election_timeout)
     assert RaftedValue.run_command(leader, :inc) == {:ok, 2}
   end
 
@@ -246,7 +248,7 @@ defmodule RaftedValueTest do
 
       # leader should not step down as long as it can access majority of members
       {:leader, _} = :sys.get_state(leader)
-      :timer.sleep(@conf.election_timeout * 2)
+      :timer.sleep(@t_max_election_timeout)
       {:leader, _} = :sys.get_state(leader)
 
       follower_threshold = Enum.random(followers -- followers_failing)
@@ -256,7 +258,7 @@ defmodule RaftedValueTest do
 
       # leader should step down if it cannot reach quorum for a while
       {:leader, _} = :sys.get_state(leader)
-      :timer.sleep(@conf.election_timeout * 2)
+      :timer.sleep(@t_max_election_timeout)
       {:follower, _} = :sys.get_state(leader)
     end)
   end
@@ -472,7 +474,7 @@ defmodule RaftedValueTest do
       end
     if target do
       assert RaftedValue.remove_follower(leader, target) == :ok
-      :timer.sleep(1000)
+      :timer.sleep(@t_max_election_timeout)
       assert_receive({:EXIT, ^target, :normal})
       wait_until_member_change_completes(leader)
       %{context | working: List.delete(working, target)}
@@ -494,7 +496,7 @@ defmodule RaftedValueTest do
       assert_receive({:EXIT, ^target, :normal})
       new_context = %{context | working: List.delete(working, target), killed: [target | killed], isolated: List.delete(isolated, target)}
       if target == leader do
-        :timer.sleep(1000)
+        :timer.sleep(@t_max_election_timeout)
         new_leader = find_leader(new_context.working)
         %{new_context | current_leader: new_leader}
       else

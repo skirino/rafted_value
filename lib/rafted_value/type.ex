@@ -11,16 +11,6 @@ defmodule RaftedValue.Config do
   ]
 end
 
-defmodule RaftedValue.ServerId do
-  @type t :: pid | atom | {atom, node}
-  defun validate(v :: any) :: Croma.Result.t(t) do
-    pid when is_pid(pid)                              -> {:ok, pid}
-    name when is_atom(name)                           -> {:ok, name}
-    {name, node} when is_atom(name) and is_atom(node) -> {:ok, {name, node}}
-    _                                                 -> {:error, {:invalid_value, [__MODULE__]}}
-  end
-end
-
 defmodule RaftedValue.TermNumber do
   use Croma.SubtypeOfInt, min: 0
 end
