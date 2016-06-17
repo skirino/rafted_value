@@ -174,10 +174,6 @@ defmodule RaftedValue.Logs do
     {new_logs, new_logs.map[new_logs.i_max]}
   end
 
-  defun forget_about_follower(%__MODULE__{followers: followers} = logs :: t, follower_to_remove :: pid) :: t do
-    %__MODULE__{logs | followers: Map.delete(followers, follower_to_remove)}
-  end
-
   #
   # for non-leader
   #

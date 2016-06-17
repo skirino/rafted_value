@@ -517,15 +517,14 @@ defmodule RaftedValue.Server do
     %State{state | election: Election.reset_timer(election, config)}
   end
 
-  defunp leader_apply_committed_log_entry(entry :: LogEntry.t, %State{members: members, logs: logs} = state) :: State.t do
+  defunp leader_apply_committed_log_entry(entry :: LogEntry.t, %State{members: members} = state) :: State.t do
     case entry do
       {_term, _index, :command        , tuple        } -> run_command(state, tuple, true)
       {_term, _index, :leader_elected , _leader_pid  } -> state
       {_term, index , :add_follower   , _follower_pid} -> %State{state | members: Members.membership_change_committed(members, index)}
       {_term, index , :remove_follower, follower_pid } ->
         send_event(state, follower_pid, :remove_follower_completed) # don't use :gen_fsm.stop in order to stop `follower_pid` only when it's actually a follower
-        new_logs = Logs.forget_about_follower(logs, follower_pid)
-        %State{state | members: Members.membership_change_committed(members, index), logs: new_logs}
+        %State{state | members: Members.membership_change_committed(members, index)}
     end
   end
 
