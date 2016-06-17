@@ -28,7 +28,7 @@ defmodule RaftedValueTest do
     :timer.sleep(10)
     {:leader, state} = :sys.get_state(leader)
     members = state.members
-    if members.uncommitted_membership_change && state.pending_leader_change do
+    if members.uncommitted_membership_change && members.pending_leader_change do
       wait_until_member_change_completes(leader)
     else
       :ok
@@ -258,7 +258,7 @@ defmodule RaftedValueTest do
       follower_threshold = Enum.random(followers -- followers_failing)
       assert :gen_fsm.stop(follower_threshold) == :ok
       assert_received({:EXIT, ^follower_threshold, :normal})
-      catch_exit RaftedValue.run_command(leader, :get, 100)
+      assert RaftedValue.run_command(leader, :get, 100) == {:error, :timeout}
 
       # leader should step down if it cannot reach quorum for a while
       {:leader, _} = :sys.get_state(leader)
