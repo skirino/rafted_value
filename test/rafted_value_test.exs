@@ -121,12 +121,19 @@ defmodule RaftedValueTest do
 
   test "should report error when trying to remove non member" do
     {:ok, leader} = RaftedValue.start_link({:create_new_consensus_group, @conf})
-    assert :gen_fsm.sync_send_event(leader, {:remove_follower, self}) == {:error, :not_member}
+    assert RaftedValue.remove_follower(leader, self) == {:error, :not_member}
   end
 
   test "start_link_and_join_consensus_group should return error and the process should die when no leader found" do
     {:error, _} = RaftedValue.start_link({:join_existing_consensus_group, [:unknown, :member]})
     assert_receive({:EXIT, _pid, _})
+  end
+
+  test "should refuse to remove healthy follower if it breaks the current quorum" do
+    {leader, [follower1, follower2]} = make_cluster(2)
+    assert :gen_fsm.stop(follower1) == :ok
+    :timer.sleep(1000)
+    assert RaftedValue.remove_follower(leader, follower2) == {:error, :will_break_quorum}
   end
 
   test "replace_leader should eventually replace leader" do

@@ -64,6 +64,18 @@ defmodule RaftedValue.Leadership do
     Enum.filter_map(times, fn {_, t} -> t < since end, fn {pid, _} -> pid end)
   end
 
+  defun can_safely_remove?(%__MODULE__{} = l, %Members{all: all}, follower :: pid, config :: Config.t) :: boolean do
+    unhealthy_followers = unresponsive_followers(l, config)
+    if follower in unhealthy_followers do
+      true # unhealthy follower can always be safely removed
+    else
+      # healthy follower can be removed if remaining members can reach majority
+      n_members_after_remove         = PidSet.size(all) - 1
+      n_healthy_members_after_remove = n_members_after_remove - length(unhealthy_followers)
+      n_healthy_members_after_remove * 2 > n_members_after_remove
+    end
+  end
+
   defunp monotonic_millis :: integer do
     System.monotonic_time(:milli_seconds)
   end

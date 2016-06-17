@@ -206,14 +206,18 @@ defmodule RaftedValue.Server do
   end
   def leader({:remove_follower, old_follower},
              _from,
-             %State{members: members, current_term: term, logs: logs, config: config} = state) do
+             %State{members: members, current_term: term, leadership: leadership, logs: logs, config: config} = state) do
     {new_logs, remove_follower_entry} = Logs.prepare_to_remove_follower(logs, term, old_follower, config)
     case Members.start_removing_follower(members, remove_follower_entry) do
       {:error, _} = e    -> same_fsm_state_reply(state, e)
       {:ok, new_members} ->
-        %State{state | members: new_members, logs: new_logs}
-        |> broadcast_append_entries
-        |> same_fsm_state_reply(:ok)
+        if Leadership.can_safely_remove?(leadership, members, old_follower, config) do
+          %State{state | members: new_members, logs: new_logs}
+          |> broadcast_append_entries
+          |> same_fsm_state_reply(:ok)
+        else
+          same_fsm_state_reply(state, {:error, :will_break_quorum})
+        end
     end
   end
   def leader({:replace_leader, new_leader},
