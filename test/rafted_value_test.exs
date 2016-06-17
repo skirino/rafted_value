@@ -49,8 +49,8 @@ defmodule RaftedValueTest do
     follower
   end
 
-  defp make_cluster(n_follower) do
-    {:ok, leader} = RaftedValue.start_link({:create_new_consensus_group, @conf})
+  defp make_cluster(n_follower, config \\ @conf) do
+    {:ok, leader} = RaftedValue.start_link({:create_new_consensus_group, config})
     followers = Enum.map(1 .. n_follower, fn _ -> add_follower(leader) end)
     {leader, followers}
   end
@@ -455,13 +455,14 @@ defmodule RaftedValueTest do
     followers_in_majority = List.delete(working, leader)
     next_leader = Enum.random(followers_in_majority)
     assert RaftedValue.replace_leader(leader, next_leader) == :ok
-    wait_until_state_name_changes(next_leader, :leader)
-    %{context | current_leader: next_leader}
+    assert_receive({:elected, new_leader}, @t_max_election_timeout)
+    %{context | current_leader: new_leader}
   end
 
   def op_add_follower(context) do
     leader = context.current_leader
     new_follower = add_follower(leader)
+    assert_receive({:follower_added, pid}, @t_max_election_timeout)
     %{context | working: [new_follower | context.working]}
   end
 
@@ -476,9 +477,8 @@ defmodule RaftedValueTest do
       end
     if target do
       assert RaftedValue.remove_follower(leader, target) == :ok
-      :timer.sleep(@t_max_election_timeout)
+      assert_receive({:follower_removed, ^target}, @t_max_election_timeout)
       assert_receive({:EXIT, ^target, :normal})
-      wait_until_member_change_completes(leader)
       %{context | working: List.delete(working, target)}
     else
       context
@@ -498,8 +498,7 @@ defmodule RaftedValueTest do
       assert_receive({:EXIT, ^target, :normal})
       new_context = %{context | working: List.delete(working, target), killed: [target | killed], isolated: List.delete(isolated, target)}
       if target == leader do
-        :timer.sleep(@t_max_election_timeout)
-        new_leader = find_leader(new_context.working)
+        assert_receive({:elected, new_leader}, @t_max_election_timeout)
         %{new_context | current_leader: new_leader}
       else
         new_context
@@ -515,26 +514,29 @@ defmodule RaftedValueTest do
     %{context | killed: List.delete(killed, target)}
   end
 
-  defp find_leader(members, n \\ 2) do
-    if n == 0 do
-      raise "no leader found!"
-    else
-      :timer.sleep(100)
-      Enum.find_value(members, fn m ->
-        RaftedValue.status(m)[:leader]
-      end) || find_leader(members, n - 1)
-    end
+  defmodule MessageSendingHook do
+    @behaviour RaftedValue.LeaderHook
+    def on_command_committed(_, _, _, _), do: nil
+    def on_follower_added(pid)          , do: send(:test_runner, {:follower_added, pid})
+    def on_follower_removed(pid)        , do: send(:test_runner, {:follower_removed, pid})
+    def on_elected                      , do: send(:test_runner, {:elected, self})
   end
 
   test "3,4,5,6,7-member cluster should maintain invariance and keep responsive in the face of minority failure" do
-    {leader, followers} = make_cluster(2)
-    members = [leader | followers]
-    context = %{working: members, killed: [], isolated: [], current_leader: leader, leaders: %{}, term_numbers: %{}, commit_indices: %{}, data: %{}}
-    assert_invariances(context)
+    Process.register(self, :test_runner)
+    config = Map.put(@conf, :leader_hook_module, MessageSendingHook)
+    {leader, [follower1, follower2]} = make_cluster(2, config)
+    assert_received({:follower_added, ^follower1})
+    assert_received({:follower_added, ^follower2})
+
+    members = [leader, follower1, follower2]
+    context =
+      %{working: members, killed: [], isolated: [], current_leader: leader, leaders: %{}, term_numbers: %{}, commit_indices: %{}, data: %{}}
+      |> assert_invariances
     client_pid = spawn_link(fn -> client_process_loop(members, I.new) end)
 
     new_context =
-      Enum.reduce(1 .. 100, context, fn(_, c1) ->
+      Enum.reduce(1 .. 50, context, fn(_, c1) ->
         op = pick_operation(c1)
         c2 = apply(__MODULE__, op, [c1]) |> assert_invariances
         send(client_pid, {:members, c2.working})

@@ -517,13 +517,20 @@ defmodule RaftedValue.Server do
     %State{state | election: Election.reset_timer(election, config)}
   end
 
-  defunp leader_apply_committed_log_entry(entry :: LogEntry.t, %State{members: members} = state) :: State.t do
+  defunp leader_apply_committed_log_entry(entry :: LogEntry.t,
+                                          %State{members: members, config: %Config{leader_hook_module: hook}} = state) :: State.t do
     case entry do
-      {_term, _index, :command        , tuple        } -> run_command(state, tuple, true)
-      {_term, _index, :leader_elected , _leader_pid  } -> state
-      {_term, index , :add_follower   , _follower_pid} -> %State{state | members: Members.membership_change_committed(members, index)}
-      {_term, index , :remove_follower, follower_pid } ->
+      {_term, _index, :command, tuple} ->
+        run_command(state, tuple, true)
+      {_term, _index, :leader_elected, leader_pid} ->
+        if leader_pid == self, do: hook.on_elected
+        state
+      {_term, index , :add_follower, follower_pid} ->
+        hook.on_follower_added(follower_pid)
+        %State{state | members: Members.membership_change_committed(members, index)}
+      {_term, index , :remove_follower, follower_pid} ->
         send_event(state, follower_pid, :remove_follower_completed) # don't use :gen_fsm.stop in order to stop `follower_pid` only when it's actually a follower
+        hook.on_follower_removed(follower_pid)
         %State{state | members: Members.membership_change_committed(members, index)}
     end
   end
@@ -538,22 +545,19 @@ defmodule RaftedValue.Server do
   end
 
   defp run_command(%State{data: data, command_results: command_results, config: config} = state, {client, arg, cmd_id}, leader?) do
-    reply_if_leader = fn result ->
-      if leader? do
-        reply(state, client, {:ok, result})
-      end
-    end
-
     case CommandResults.fetch(command_results, cmd_id) do
       {:ok, result} ->
         # this command is already executed => don't execute command twice and just return
-        reply_if_leader.(result)
+        if leader?, do: reply(state, client, {:ok, result})
         state
       :error ->
-        %Config{data_ops_module: mod, max_retained_command_results: max} = config
+        %Config{data_ops_module: mod, leader_hook_module: hook, max_retained_command_results: max} = config
         {result, new_data} = mod.command(data, arg)
         new_command_results = CommandResults.put(command_results, cmd_id, result, max)
-        reply_if_leader.(result)
+        if leader? do
+          reply(state, client, {:ok, result})
+          hook.on_command_committed(data, arg, result, new_data)
+        end
         %State{state | data: new_data, command_results: new_command_results}
     end
   end

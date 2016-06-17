@@ -25,6 +25,7 @@ defmodule RaftedValue do
   defun make_config(data_ops_module :: g[atom], opts :: Keyword.t(any) \\ []) :: Config.t do
     %Config{
       data_ops_module:              data_ops_module,
+      leader_hook_module:           Keyword.get(opts, :leader_hook_module          , RaftedValue.LeaderHook.NoOp),
       communication_module:         Keyword.get(opts, :communication_module        , :gen_fsm),
       heartbeat_timeout:            Keyword.get(opts, :heartbeat_timeout           , 200),
       election_timeout:             Keyword.get(opts, :election_timeout            , 1000),
