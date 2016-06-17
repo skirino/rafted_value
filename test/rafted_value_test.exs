@@ -20,6 +20,10 @@ defmodule RaftedValueTest do
 
   @t_max_election_timeout @conf.election_timeout * 2
 
+  defp assert_equal_as_set(set1, set2) do
+    assert Enum.sort(set1) == Enum.sort(set2)
+  end
+
   defp wait_until_member_change_completes(leader) do
     :timer.sleep(10)
     {:leader, state} = :sys.get_state(leader)
@@ -277,7 +281,9 @@ defmodule RaftedValueTest do
 
     send(leader, :info_message)
     assert :gen_fsm.send_all_state_event(leader, :foo) == :ok
-    %{members: all, leader: l} = RaftedValue.status(leader)
+    result = RaftedValue.status(leader)
+    assert_equal_as_set(Map.keys(result), [:from, :members, :leader, :unresponsive_followers, :current_term, :state_name, :config])
+    %{members: all, leader: l} = result
     assert Enum.sort(all) == Enum.sort([leader | followers])
     assert l == leader
     assert Process.alive?(leader)
@@ -386,14 +392,10 @@ defmodule RaftedValueTest do
     refute state.leadership
   end
 
-  defp assert_equal_set(set1, set2) do
-    assert Enum.sort(set1) == Enum.sort(set2)
-  end
-
   defp assert_server_logs_invariance(logs, config) do
     assert logs.i_min       <= logs.i_committed
     assert logs.i_committed <= logs.i_max
-    assert_equal_set(Map.keys(logs.map), logs.i_min .. logs.i_max)
+    assert_equal_as_set(Map.keys(logs.map), logs.i_min .. logs.i_max)
     assert logs.i_committed - logs.i_min + 1 <= config.max_retained_committed_logs
   end
 
@@ -519,8 +521,7 @@ defmodule RaftedValueTest do
     else
       :timer.sleep(100)
       Enum.find_value(members, fn m ->
-        %{leader: leader} = RaftedValue.status(m)
-        leader
+        RaftedValue.status(m)[:leader]
       end) || find_leader(members, n - 1)
     end
   end

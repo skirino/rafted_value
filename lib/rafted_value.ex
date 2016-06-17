@@ -64,6 +64,7 @@ defmodule RaftedValue do
   end
 
   @type status_result :: %{
+    from:                   pid,
     members:                [pid],
     leader:                 nil | pid,
     unresponsive_followers: [pid],

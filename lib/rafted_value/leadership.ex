@@ -7,7 +7,7 @@ defmodule RaftedValue.Leadership do
     heartbeat_timer:          Croma.Reference,
     quorum_timer:             Croma.Reference,
     quorum_timer_started_at:  Croma.Integer,
-    follower_responded_times: Croma.Map,
+    follower_responded_times: Croma.Map, # %{pid => integer}
   ]
 
   defun new_for_leader(config :: Config.t) :: t do

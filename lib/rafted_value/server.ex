@@ -475,6 +475,7 @@ defmodule RaftedValue.Server do
   def handle_sync_event(_event, _from, state_name, %State{members: members, current_term: current_term, leadership: leadership, config: config} = state) do
     unresponsive_followers = if state_name == :leader, do: Leadership.unresponsive_followers(leadership, config), else: []
     result = %{
+      from:                   self,
       members:                PidSet.to_list(members.all),
       leader:                 members.leader,
       unresponsive_followers: unresponsive_followers,
