@@ -520,6 +520,29 @@ defmodule RaftedValueTest do
     end
   end
 
+  defp start_cluster_and_client(config) do
+    Process.register(self, :test_runner)
+    {leader, [follower1, follower2]} = make_cluster(2, config)
+    assert_received({:follower_added, ^follower1})
+    assert_received({:follower_added, ^follower2})
+
+    initial_members = [leader, follower1, follower2]
+    context =
+      %{working: initial_members, killed: [], isolated: [], current_leader: leader, leaders: %{}, term_numbers: %{}, commit_indices: %{}, data: %{}}
+      |> assert_invariants
+    client_pid = spawn_link(fn -> client_process_loop(initial_members, JustAnInt.new) end)
+    {context, client_pid}
+  end
+
+  defp repeatedly_change_cluster_configuration(context, client_pid, n) do
+    Enum.reduce(1 .. n, context, fn(_, c1) ->
+      op = pick_operation(c1)
+      c2 = apply(__MODULE__, op, [c1]) |> assert_invariants
+      send(client_pid, {:members, c2.working})
+      c2
+    end)
+  end
+
   defp finish_client_process(client_pid) do
     :timer.sleep(100)
     refute_received({:EXIT, ^client_pid, _})
@@ -538,25 +561,10 @@ defmodule RaftedValueTest do
   end
 
   test "3,4,5,6,7-member cluster should maintain invariants and keep responsive in the face of minority failure" do
-    Process.register(self, :test_runner)
     config = Map.put(@conf, :leader_hook_module, MessageSendingHook)
-    {leader, [follower1, follower2]} = make_cluster(2, config)
-    assert_received({:follower_added, ^follower1})
-    assert_received({:follower_added, ^follower2})
+    {context, client_pid} = start_cluster_and_client(config)
 
-    members = [leader, follower1, follower2]
-    context =
-      %{working: members, killed: [], isolated: [], current_leader: leader, leaders: %{}, term_numbers: %{}, commit_indices: %{}, data: %{}}
-      |> assert_invariants
-    client_pid = spawn_link(fn -> client_process_loop(members, JustAnInt.new) end)
-
-    new_context =
-      Enum.reduce(1 .. 50, context, fn(_, c1) ->
-        op = pick_operation(c1)
-        c2 = apply(__MODULE__, op, [c1]) |> assert_invariants
-        send(client_pid, {:members, c2.working})
-        c2
-      end)
+    new_context = repeatedly_change_cluster_configuration(context, client_pid, 50)
 
     finish_client_process(client_pid)
     assert_all_members_up_to_date(new_context)
@@ -594,21 +602,12 @@ defmodule RaftedValueTest do
   end
 
   test "3,4,5,6,7-member cluster should maintain invariants and keep responsive during non-critical netsplit" do
-    Process.register(self, :test_runner)
     CommunicationWithNetsplit.start
     config =
       @conf
       |> Map.put(:leader_hook_module, MessageSendingHook)
       |> Map.put(:communication_module, CommunicationWithNetsplit)
-    {leader, [follower1, follower2]} = make_cluster(2, config)
-    assert_received({:follower_added, ^follower1})
-    assert_received({:follower_added, ^follower2})
-
-    members = [leader, follower1, follower2]
-    context =
-      %{working: members, killed: [], isolated: [], current_leader: leader, leaders: %{}, term_numbers: %{}, commit_indices: %{}, data: %{}}
-      |> assert_invariants
-    client_pid = spawn_link(fn -> client_process_loop(members, JustAnInt.new) end)
+    {context, client_pid} = start_cluster_and_client(config)
 
     new_context =
       Enum.reduce(1 .. 10, context, fn(_, c1) ->
@@ -629,21 +628,15 @@ defmodule RaftedValueTest do
           end
         c2 = %{c1 | working: working_after_split, isolated: isolated, current_leader: leader_after_netsplit}
 
-        c5 =
-          Enum.reduce(1 .. 5, c2, fn(_, c3) ->
-            op = pick_operation(c3)
-            c4 = apply(__MODULE__, op, [c3]) |> assert_invariants
-            send(client_pid, {:members, c4.working})
-            c4
-          end)
+        c3 = repeatedly_change_cluster_configuration(c2, client_pid, 5)
 
         # cleanup: recover from netsplit, find new leader, purge killed
-        working_after_heal = c5.working ++ c5.isolated
+        working_after_heal = c3.working ++ c3.isolated
         send(client_pid, {:members, working_after_heal})
         CommunicationWithNetsplit.set([])
-        leader_after_heal = receive_leader_elected_message || c5.current_leader
-        c6 = %{c5 | working: working_after_heal, isolated: [], current_leader: leader_after_heal}
-        Enum.reduce(c6.killed, c6, fn(_, c) -> op_purge_killed_member(c) end)
+        leader_after_heal = receive_leader_elected_message || c3.current_leader
+        c4 = %{c3 | working: working_after_heal, isolated: [], current_leader: leader_after_heal}
+        Enum.reduce(c4.killed, c4, fn(_, c) -> op_purge_killed_member(c) end)
       end)
 
     finish_client_process(client_pid)
