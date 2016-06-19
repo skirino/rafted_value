@@ -22,9 +22,9 @@ defmodule RaftedValue do
     end
   end
 
-  defun make_config(data_ops_module :: g[atom], opts :: Keyword.t(any) \\ []) :: Config.t do
+  defun make_config(command_module :: g[atom], opts :: Keyword.t(any) \\ []) :: Config.t do
     %Config{
-      data_ops_module:              data_ops_module,
+      command_module:               command_module,
       leader_hook_module:           Keyword.get(opts, :leader_hook_module          , RaftedValue.LeaderHook.NoOp),
       communication_module:         Keyword.get(opts, :communication_module        , :gen_fsm),
       heartbeat_timeout:            Keyword.get(opts, :heartbeat_timeout           , 200),
@@ -48,7 +48,7 @@ defmodule RaftedValue do
   @type command_identifier :: reference | any
 
   defun run_command(leader      :: GenServer.server,
-                    command_arg :: any,
+                    command_arg :: RaftedValue.Command.arg,
                     timeout     :: timeout \\ 5000,
                     id          :: command_identifier \\ make_ref) :: {:ok, any} | {:error, atom} do
     catch_exit(fn ->

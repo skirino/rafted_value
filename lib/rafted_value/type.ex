@@ -2,7 +2,7 @@ use Croma
 
 defmodule RaftedValue.Config do
   use Croma.Struct, fields: [
-    data_ops_module:              Croma.Atom,
+    command_module:               Croma.Atom,
     leader_hook_module:           Croma.Atom,
     communication_module:         Croma.Atom,
     heartbeat_timeout:            Croma.PosInteger,

@@ -94,7 +94,7 @@ defmodule RaftedValue.Server do
   # initialization
   #
   def init({:create_new_consensus_group, config}) do
-    data        = config.data_ops_module.new
+    data        = config.command_module.new
     logs        = Logs.new_for_lonely_leader
     members     = Members.new_for_lonely_leader
     leadership  = Leadership.new_for_leader(config)
@@ -551,7 +551,7 @@ defmodule RaftedValue.Server do
         if leader?, do: reply(state, client, {:ok, result})
         state
       :error ->
-        %Config{data_ops_module: mod, leader_hook_module: hook, max_retained_command_results: max} = config
+        %Config{command_module: mod, leader_hook_module: hook, max_retained_command_results: max} = config
         {result, new_data} = mod.command(data, arg)
         new_command_results = CommandResults.put(command_results, cmd_id, result, max)
         if leader? do

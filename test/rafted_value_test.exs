@@ -2,16 +2,15 @@ defmodule RaftedValueTest do
   use ExUnit.Case
   alias RaftedValue.PidSet
 
-  defmodule I do
-    @behaviour RaftedValue.DataOps
-    @type t :: integer
+  defmodule JustAnInt do
+    @behaviour RaftedValue.Command
     def new, do: 0
     def command(i, :get     ), do: {i, i    }
     def command(i, {:set, j}), do: {i, j    }
     def command(i, :inc     ), do: {i, i + 1}
   end
 
-  @conf RaftedValue.make_config(I, [
+  @conf RaftedValue.make_config(JustAnInt, [
     max_retained_committed_logs:  10,
     max_retained_command_results: 10,
     heartbeat_timeout:            100,
@@ -308,7 +307,7 @@ defmodule RaftedValueTest do
           end
         case run_command(members, cmd, ref) do
           {:ok, ret} ->
-            {expected_ret, new_value} = I.command(value, cmd)
+            {expected_ret, new_value} = JustAnInt.command(value, cmd)
             assert ret == expected_ret
             client_process_loop(members, new_value)
           :error ->
@@ -549,7 +548,7 @@ defmodule RaftedValueTest do
     context =
       %{working: members, killed: [], isolated: [], current_leader: leader, leaders: %{}, term_numbers: %{}, commit_indices: %{}, data: %{}}
       |> assert_invariances
-    client_pid = spawn_link(fn -> client_process_loop(members, I.new) end)
+    client_pid = spawn_link(fn -> client_process_loop(members, JustAnInt.new) end)
 
     new_context =
       Enum.reduce(1 .. 50, context, fn(_, c1) ->
@@ -609,7 +608,7 @@ defmodule RaftedValueTest do
     context =
       %{working: members, killed: [], isolated: [], current_leader: leader, leaders: %{}, term_numbers: %{}, commit_indices: %{}, data: %{}}
       |> assert_invariances
-    client_pid = spawn_link(fn -> client_process_loop(members, I.new) end)
+    client_pid = spawn_link(fn -> client_process_loop(members, JustAnInt.new) end)
 
     new_context =
       Enum.reduce(1 .. 10, context, fn(_, c1) ->

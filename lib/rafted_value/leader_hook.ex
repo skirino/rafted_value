@@ -3,14 +3,14 @@ defmodule RaftedValue.LeaderHook do
   TODO: Write something
   """
 
-  alias RaftedValue.DataOps
+  alias RaftedValue.Command
   @type neglected :: any
 
   @callback on_command_committed(
-    data_before_command :: DataOps.data,
-    command_arg         :: DataOps.command_arg,
-    command_return      :: DataOps.ret,
-    data_after_command  :: DataOps.data) :: neglected
+    data_before_command :: Command.data,
+    command_arg         :: Command.arg,
+    command_return      :: Command.ret,
+    data_after_command  :: Command.data) :: neglected
   @callback on_follower_added(pid)       :: neglected
   @callback on_follower_removed(pid)     :: neglected
   @callback on_elected                   :: neglected
