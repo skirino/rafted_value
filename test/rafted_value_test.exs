@@ -137,6 +137,7 @@ defmodule RaftedValueTest do
   test "should refuse to remove healthy follower if it breaks the current quorum" do
     {leader, [follower1, follower2]} = make_cluster(2)
     assert :gen_fsm.stop(follower1) == :ok
+    assert_received({:EXIT, ^follower1, :normal})
     :timer.sleep(@t_max_election_timeout)
     assert RaftedValue.remove_follower(leader, follower2) == {:error, :will_break_quorum}
   end
@@ -189,6 +190,7 @@ defmodule RaftedValueTest do
   test "replace_leader should reject change to unhealthy follower" do
     {leader, [follower1, _]} = make_cluster(2)
     assert :gen_fsm.stop(follower1) == :ok
+    assert_received({:EXIT, ^follower1, :normal})
     :timer.sleep(@t_max_election_timeout)
     assert RaftedValue.replace_leader(leader, follower1) == {:error, :new_leader_unresponsive}
   end
@@ -320,7 +322,7 @@ defmodule RaftedValueTest do
   defp pick_command do
     Enum.random([
       :get,
-      {:set, 1},
+      {:set, :rand.uniform(10)},
       :inc,
     ])
   end
@@ -553,7 +555,7 @@ defmodule RaftedValueTest do
   end
 
   defp assert_all_members_up_to_date(context) do
-    :timer.sleep(250)
+    :timer.sleep(@conf.heartbeat_timeout * 2)
     indices = Enum.map(context.working, fn m ->
       {_, state} = :sys.get_state(m)
       assert state.logs.i_committed == state.logs.i_max
