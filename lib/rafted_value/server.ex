@@ -8,9 +8,9 @@ defmodule RaftedValue.Server do
   #
   # Implementation notes
   #
-  # ## events
+  # ## Events
   #
-  # - async
+  # - async (member-to-member messages)
   #   - defined in Raft (all contains `term`)
   #     - AppendEntriesRequest
   #     - AppendEntriesResponse
@@ -21,15 +21,15 @@ defmodule RaftedValue.Server do
   #   - others
   #     - :heartbeat_timeout
   #     - :election_timeout
-  #     - :remove_follower_completed
   #     - :cannot_reach_quorum
-  # - sync
+  #     - :remove_follower_completed
+  # - sync (client-to-leader messages)
   #   - {:command, arg, cmd_id}
   #   - {:add_follower, pid}
   #   - {:remove_follower, pid}
   #   - {:replace_leader, new_leader}
   #
-  # ## state transitions
+  # ## State transitions
   #
   # - :leader or :candidate => :follower, when newer term started
   #   - in this case the incoming message that triggers the transition should be handled as a follower
@@ -322,18 +322,20 @@ defmodule RaftedValue.Server do
     same_fsm_state_reply(state, {:error, {:not_leader, members.leader}})
   end
 
-  defp become_candidate_and_start_new_election(%State{members: members, current_term: term, election: election, config: config} = state) do
+  defp become_candidate_and_start_new_election(%State{members: members, current_term: term, election: election, config: config} = state,
+                                               replacing_leader? \\ false) do
     new_members  = Members.put_leader(members, nil)
     new_election = Election.replace_for_candidate(election, config)
     new_state = %State{state | members: new_members, current_term: term + 1, election: new_election}
-    broadcast_request_vote(new_state)
+    broadcast_request_vote(new_state, replacing_leader?)
     next_state(new_state, :candidate)
   end
 
-  defunp broadcast_request_vote(%State{members: members, current_term: term, logs: logs} = state) :: :ok do
+  defunp broadcast_request_vote(%State{members: members, current_term: term, logs: logs} = state,
+                                replacing_leader? :: boolean) :: :ok do
     Members.other_members_list(members) |> Enum.each(fn member ->
       {last_log_term, last_log_index, _, _} = Logs.last_entry(logs)
-      req = %RequestVoteRequest{term: term, candidate_pid: self, last_log: {last_log_term, last_log_index}}
+      req = %RequestVoteRequest{term: term, candidate_pid: self, last_log: {last_log_term, last_log_index}, replacing_leader: replacing_leader?}
       send_event(state, member, req)
     end)
   end
@@ -363,7 +365,7 @@ defmodule RaftedValue.Server do
       {new_logs, new_members1, applicable_entries} = Logs.append_entries(logs, members, entries, i_leader_commit, config)
       new_state1 = %State{state | members: new_members1, logs: new_logs}
       new_state2 = Enum.reduce(applicable_entries, new_state1, &nonleader_apply_committed_log_entry/2)
-      become_candidate_and_start_new_election(new_state2)
+      become_candidate_and_start_new_election(new_state2, true)
     else
       # if condition is not met neglect the message
       same_fsm_state(state)

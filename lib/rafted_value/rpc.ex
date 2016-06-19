@@ -25,9 +25,10 @@ defmodule RaftedValue.RPC do
 
   defmodule RequestVoteRequest do
     use Croma.Struct, fields: [
-      term:          TermNumber,
-      candidate_pid: Croma.Atom,
-      last_log:      LogInfo,
+      term:             TermNumber,
+      candidate_pid:    Croma.Atom,
+      last_log:         LogInfo,
+      replacing_leader: Croma.Boolean,
     ]
   end
 
