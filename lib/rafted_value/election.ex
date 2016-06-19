@@ -34,29 +34,20 @@ defmodule RaftedValue.Election do
     %__MODULE__{e | voted_for: candidate, timer: start_timer(config)}
   end
 
-  defun gain_vote(%__MODULE__{votes: votes} = e, %Members{all: all_members}, voter :: pid) :: {t, boolean} do
+  defun gain_vote(%__MODULE__{votes: votes, timer: timer} = e, %Members{all: all_members}, voter :: pid) :: {t, boolean} do
     new_votes = PidSet.put(votes, voter)
-    new_election = %__MODULE__{e | votes: new_votes}
     majority? = PidSet.size(new_votes) >= div(PidSet.size(all_members), 2) + 1
     if majority? do
-      {cancel_timer(new_election), true}
+      :gen_fsm.cancel_timer(timer) # this function is called during `:candidate` state, in which `timer` is always on
+      {%__MODULE__{e | votes: new_votes, timer: nil}, true}
     else
-      {new_election, false}
+      {%__MODULE__{e | votes: new_votes}, false}
     end
   end
 
   defun reset_timer(%__MODULE__{timer: timer} = e, config :: Config.t) :: t do
     if timer, do: :gen_fsm.cancel_timer(timer)
     %__MODULE__{e | timer: start_timer(config)}
-  end
-
-  defunp cancel_timer(%__MODULE__{timer: timer} = e) :: t do
-    if timer do
-      :gen_fsm.cancel_timer(timer)
-      %__MODULE__{e | timer: nil}
-    else
-      e
-    end
   end
 
   defunp start_timer(%Config{election_timeout: timeout}) :: reference do
