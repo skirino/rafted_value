@@ -402,10 +402,12 @@ defmodule RaftedValueTest do
         |> assert_gte_and_put_in_context([:term_numbers  , member], state.current_term)
         |> assert_gte_and_put_in_context([:commit_indices, member], state.logs.i_committed)
       end)
-    Enum.filter(member_state_pairs, &match?({_, {:leader, _}}, &1))
-    |> Enum.reduce(context1, fn({member, {_, leader_state}}, context) ->
+    leader_pairs = Enum.filter(member_state_pairs, &match?({_, {:leader, _}}, &1))
+    context2 = Enum.reduce(leader_pairs, context1, fn({member, {_, leader_state}}, context) ->
       assert_equal_or_put_in_context(context, [:leaders, leader_state.current_term], member)
     end)
+    {_, {_, latest_leader_state}} = Enum.max_by(leader_pairs, fn {_, {_, state}} -> state.current_term end)
+    assert_gte_and_put_in_context(context2, [:leader_commit_index], latest_leader_state.logs.i_committed)
   end
 
   defp assert_equal_or_put_in_context(context, keys, value) do
@@ -528,7 +530,7 @@ defmodule RaftedValueTest do
 
     initial_members = [leader, follower1, follower2]
     context =
-      %{working: initial_members, killed: [], isolated: [], current_leader: leader, leaders: %{}, term_numbers: %{}, commit_indices: %{}, data: %{}}
+      %{working: initial_members, killed: [], isolated: [], current_leader: leader, leaders: %{}, term_numbers: %{}, commit_indices: %{}, leader_commit_index: 0, data: %{}}
       |> assert_invariants
     client_pid = spawn_link(fn -> client_process_loop(initial_members, JustAnInt.new) end)
     {context, client_pid}
