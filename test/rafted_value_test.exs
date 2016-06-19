@@ -337,20 +337,20 @@ defmodule RaftedValueTest do
     end
   end
 
-  defp assert_invariances(%{working: working, isolated: isolated} = context) do
+  defp assert_invariants(%{working: working, isolated: isolated} = context) do
     members_alive = working ++ isolated
     member_state_pairs = Enum.map(members_alive, fn m -> {m, :sys.get_state(m)} end)
     new_context =
       Enum.reduce(member_state_pairs, context, fn({member, {state_name, state}}, context0) ->
         {:ok, _} = RaftedValue.Server.State.validate(state)
-        assert_server_state_invariance(member, state_name, state)
-        assert_server_logs_invariance(state.logs, state.config)
-        assert_server_data_invariance(context0, state)
+        assert_server_state_invariants(member, state_name, state)
+        assert_server_logs_invariants(state.logs, state.config)
+        assert_server_data_invariants(context0, state)
       end)
-    assert_cluster_wide_invariance(new_context, member_state_pairs)
+    assert_cluster_wide_invariants(new_context, member_state_pairs)
   end
 
-  defp assert_server_state_invariance(pid, :leader, state) do
+  defp assert_server_state_invariants(pid, :leader, state) do
     assert state.members.leader == pid
     assert is_nil(state.members.uncommitted_membership_change) or is_nil(state.members.pending_leader_change)
     assert state.election.voted_for == pid
@@ -370,32 +370,32 @@ defmodule RaftedValueTest do
     assert length(difference) <= 1 # tolerate up to 1 difference
   end
 
-  defp assert_server_state_invariance(pid, :candidate, state) do
+  defp assert_server_state_invariants(pid, :candidate, state) do
     assert state.members.leader == nil
     assert state.election.voted_for == pid
     assert state.election.timer
     refute state.leadership
   end
 
-  defp assert_server_state_invariance(_pid, :follower, state) do
+  defp assert_server_state_invariants(_pid, :follower, state) do
     assert state.election.timer
     refute state.leadership
   end
 
-  defp assert_server_logs_invariance(logs, config) do
+  defp assert_server_logs_invariants(logs, config) do
     assert logs.i_min       <= logs.i_committed
     assert logs.i_committed <= logs.i_max
     assert_equal_as_set(Map.keys(logs.map), logs.i_min .. logs.i_max)
     assert logs.i_committed - logs.i_min + 1 <= config.max_retained_committed_logs
   end
 
-  defp assert_server_data_invariance(context, state) do
+  defp assert_server_data_invariants(context, state) do
     {_q, map} = state.command_results
     assert map_size(map) <= state.config.max_retained_command_results
     assert_equal_or_put_in_context(context, [:data, state.logs.i_committed], state.data)
   end
 
-  defp assert_cluster_wide_invariance(context0, member_state_pairs) do
+  defp assert_cluster_wide_invariants(context0, member_state_pairs) do
     context1 =
       Enum.reduce(member_state_pairs, context0, fn({member, {_, state}}, context) ->
         context
@@ -537,7 +537,7 @@ defmodule RaftedValueTest do
     assert length(Enum.uniq(indices)) == 1
   end
 
-  test "3,4,5,6,7-member cluster should maintain invariance and keep responsive in the face of minority failure" do
+  test "3,4,5,6,7-member cluster should maintain invariants and keep responsive in the face of minority failure" do
     Process.register(self, :test_runner)
     config = Map.put(@conf, :leader_hook_module, MessageSendingHook)
     {leader, [follower1, follower2]} = make_cluster(2, config)
@@ -547,13 +547,13 @@ defmodule RaftedValueTest do
     members = [leader, follower1, follower2]
     context =
       %{working: members, killed: [], isolated: [], current_leader: leader, leaders: %{}, term_numbers: %{}, commit_indices: %{}, data: %{}}
-      |> assert_invariances
+      |> assert_invariants
     client_pid = spawn_link(fn -> client_process_loop(members, JustAnInt.new) end)
 
     new_context =
       Enum.reduce(1 .. 50, context, fn(_, c1) ->
         op = pick_operation(c1)
-        c2 = apply(__MODULE__, op, [c1]) |> assert_invariances
+        c2 = apply(__MODULE__, op, [c1]) |> assert_invariants
         send(client_pid, {:members, c2.working})
         c2
       end)
@@ -593,7 +593,7 @@ defmodule RaftedValueTest do
     end
   end
 
-  test "3,4,5,6,7-member cluster should maintain invariance and keep responsive during non-critical netsplit" do
+  test "3,4,5,6,7-member cluster should maintain invariants and keep responsive during non-critical netsplit" do
     Process.register(self, :test_runner)
     CommunicationWithNetsplit.start
     config =
@@ -607,7 +607,7 @@ defmodule RaftedValueTest do
     members = [leader, follower1, follower2]
     context =
       %{working: members, killed: [], isolated: [], current_leader: leader, leaders: %{}, term_numbers: %{}, commit_indices: %{}, data: %{}}
-      |> assert_invariances
+      |> assert_invariants
     client_pid = spawn_link(fn -> client_process_loop(members, JustAnInt.new) end)
 
     new_context =
@@ -632,7 +632,7 @@ defmodule RaftedValueTest do
         c5 =
           Enum.reduce(1 .. 5, c2, fn(_, c3) ->
             op = pick_operation(c3)
-            c4 = apply(__MODULE__, op, [c3]) |> assert_invariances
+            c4 = apply(__MODULE__, op, [c3]) |> assert_invariants
             send(client_pid, {:members, c4.working})
             c4
           end)
