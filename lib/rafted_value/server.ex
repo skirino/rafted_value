@@ -47,6 +47,14 @@ defmodule RaftedValue.Server do
   # - :leader => :follower, when election timeout elapses without getting responses from majority
   #   - implemented in `leader(:cannot_reach_quorum, state)`
   #
+  # ## Misc notes
+  #
+  # - To make command execution "linearizable":
+  #   1. each command is assigned unique ID,
+  #   2. responses of command executions are cached
+  #   3. if cache found for a command, don't execute the command and just returns cached response
+  #   (note that this is basically equivalent to implicitly establish client session for each request)
+  #
 
   alias RaftedValue.{TermNumber, PidSet, Members, Leadership, Election, Logs, CommandResults, Config}
   alias RaftedValue.RPC.{
