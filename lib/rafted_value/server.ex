@@ -336,7 +336,7 @@ defmodule RaftedValue.Server do
   end
 
   def candidate(_event, _from, %State{members: members} = state) do
-    # non-leader rejects synchronous events: `{:command, arg, cmd_id}`, `{:query, arg}`, `{:add_follower, pid}` and `{:remove_follower, pid}`
+    # non-leader rejects synchronous events: `{:command, arg, cmd_id}`, `{:query, arg}`, `{:add_follower, pid}`, `{:remove_follower, pid}`, `{:replace_leader, new_leader}`
     same_fsm_state_reply(state, {:error, {:not_leader, members.leader}})
   end
 
@@ -406,7 +406,7 @@ defmodule RaftedValue.Server do
   end
 
   def follower(_event, _from, %State{members: members} = state) do
-    # non-leader rejects synchronous events: `{:command, arg, cmd_id}`, `{:query, arg}`, `{:add_follower, pid}` and `{:remove_follower, pid}`
+    # non-leader rejects synchronous events: `{:command, arg, cmd_id}`, `{:query, arg}`, `{:add_follower, pid}`, `{:remove_follower, pid}`, `{:replace_leader, new_leader}`
     same_fsm_state_reply(state, {:error, {:not_leader, members.leader}})
   end
 

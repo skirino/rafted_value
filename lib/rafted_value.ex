@@ -73,17 +73,21 @@ defmodule RaftedValue do
     } |> Config.validate!
   end
 
+  @type not_leader :: {:not_leader, nil | pid}
+  @type remove_follower_error_reason :: :uncommitted_membership_change | :not_member | :pending_leader_change | :will_break_quorum | not_leader
+  @type replace_leader_error_reason  :: :uncommitted_membership_change | :not_member | :new_leader_unresponsive | not_leader
+
   @doc """
   Removes a follower from a consensus group.
   """
-  defun remove_follower(leader :: GenServer.server, follower_pid :: g[pid]) :: :ok | {:error, atom} do
+  defun remove_follower(leader :: GenServer.server, follower_pid :: g[pid]) :: :ok | {:error, remove_follower_error_reason} do
     :gen_fsm.sync_send_event(leader, {:remove_follower, follower_pid})
   end
 
   @doc """
   Replaces current leader of a consensus group from `current_leader` to `new_leader`.
   """
-  defun replace_leader(current_leader :: GenServer.server, new_leader :: nil | pid) :: :ok | {:error, atom} do
+  defun replace_leader(current_leader :: GenServer.server, new_leader :: nil | pid) :: :ok | {:error, replace_leader_error_reason} do
     (current_leader, new_leader) when new_leader == nil or is_pid(new_leader) ->
       catch_exit(fn ->
         :gen_fsm.sync_send_event(current_leader, {:replace_leader, new_leader})
@@ -94,22 +98,24 @@ defmodule RaftedValue do
 
   @doc """
   Executes a command on the stored value of `leader`.
+
+  `id` is an identifier of the command and can be used to filter out duplicate requests.
   """
   defun command(leader      :: GenServer.server,
                 command_arg :: Data.command_arg,
                 timeout     :: timeout \\ 5000,
-                id          :: command_identifier \\ make_ref) :: {:ok, Data.command_ret} | {:error, atom} do
+                id          :: command_identifier \\ make_ref) :: {:ok, Data.command_ret} | {:error, not_leader} do
     catch_exit(fn ->
       :gen_fsm.sync_send_event(leader, {:command, command_arg, id}, timeout)
     end)
   end
 
   @doc """
-  Executes a read-only query operation on the stored value of `leader`.
+  Executes a read-only query on the stored value of `leader`.
   """
   defun query(leader    :: GenServer.server,
               query_arg :: RaftedValue.Data.query_arg,
-              timeout   :: timeout \\ 5000) :: {:ok, Data.query_ret} | {:error, atom} do
+              timeout   :: timeout \\ 5000) :: {:ok, Data.query_ret} | {:error, not_leader} do
     catch_exit(fn ->
       :gen_fsm.sync_send_event(leader, {:query, query_arg}, timeout)
     end)
