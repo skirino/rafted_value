@@ -1,10 +1,6 @@
 use Croma
 
 defmodule RaftedValue.Server do
-  @moduledoc """
-  TODO: Write something
-  """
-
   #
   # Implementation notes
   #
