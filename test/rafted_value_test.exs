@@ -3,7 +3,7 @@ defmodule RaftedValueTest do
   alias RaftedValue.PidSet
 
   defmodule JustAnInt do
-    @behaviour RaftedValue.Command
+    @behaviour RaftedValue.Data
     def new, do: 0
     def command(i, :get     ), do: {i, i    }
     def command(i, {:set, j}), do: {i, j    }

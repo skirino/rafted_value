@@ -3,17 +3,17 @@ defmodule RaftedValue.LeaderHook do
   TODO: Write something
   """
 
-  alias RaftedValue.Command
+  alias RaftedValue.Data
   @type neglected :: any
 
   @callback on_command_committed(
-    data_before_command :: Command.data,
-    command_arg         :: Command.arg,
-    command_return      :: Command.ret,
-    data_after_command  :: Command.data) :: neglected
-  @callback on_follower_added(pid)       :: neglected
-  @callback on_follower_removed(pid)     :: neglected
-  @callback on_elected                   :: neglected
+    data_before_command :: Data.data,
+    command_arg         :: Data.command_arg,
+    command_ret         :: Data.command_ret,
+    data_after_command  :: Data.data) :: neglected
+  @callback on_follower_added(pid)    :: neglected
+  @callback on_follower_removed(pid)  :: neglected
+  @callback on_elected                :: neglected
 end
 
 defmodule RaftedValue.LeaderHook.NoOp do

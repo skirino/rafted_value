@@ -50,7 +50,7 @@ defmodule RaftedValue do
   @type command_identifier :: reference | any
 
   defun command(leader      :: GenServer.server,
-                command_arg :: RaftedValue.Command.arg,
+                command_arg :: RaftedValue.Data.command_arg,
                 timeout     :: timeout \\ 5000,
                 id          :: command_identifier \\ make_ref) :: {:ok, any} | {:error, atom} do
     catch_exit(fn ->
