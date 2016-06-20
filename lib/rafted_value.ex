@@ -49,10 +49,10 @@ defmodule RaftedValue do
 
   @type command_identifier :: reference | any
 
-  defun run_command(leader      :: GenServer.server,
-                    command_arg :: RaftedValue.Command.arg,
-                    timeout     :: timeout \\ 5000,
-                    id          :: command_identifier \\ make_ref) :: {:ok, any} | {:error, atom} do
+  defun command(leader      :: GenServer.server,
+                command_arg :: RaftedValue.Command.arg,
+                timeout     :: timeout \\ 5000,
+                id          :: command_identifier \\ make_ref) :: {:ok, any} | {:error, atom} do
     catch_exit(fn ->
       :gen_fsm.sync_send_event(leader, {:command, command_arg, id}, timeout)
     end)

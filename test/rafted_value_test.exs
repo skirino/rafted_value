@@ -151,14 +151,14 @@ defmodule RaftedValueTest do
     assert RaftedValue.replace_leader(leader, follower1) == :ok
     wait_until_state_name_changes(leader, :follower)
     wait_until_state_name_changes(follower1, :leader)
-    assert RaftedValue.run_command(leader   , :inc) == {:error, {:not_leader, follower1}}
-    assert RaftedValue.run_command(follower1, :inc) == {:ok, 0}
+    assert RaftedValue.command(leader   , :inc) == {:error, {:not_leader, follower1}}
+    assert RaftedValue.command(follower1, :inc) == {:ok, 0}
 
     assert RaftedValue.replace_leader(follower1, follower2) == :ok
     wait_until_state_name_changes(follower1, :follower)
     wait_until_state_name_changes(follower2, :leader)
-    assert RaftedValue.run_command(follower1, :inc) == {:error, {:not_leader, follower2}}
-    assert RaftedValue.run_command(follower2, :inc) == {:ok, 1}
+    assert RaftedValue.command(follower1, :inc) == {:error, {:not_leader, follower2}}
+    assert RaftedValue.command(follower2, :inc) == {:ok, 1}
   end
 
   test "later replace_leader operation should override previous one" do
@@ -199,57 +199,57 @@ defmodule RaftedValueTest do
   test "leader should respond to client requests" do
     {leader, [follower1, follower2]} = make_cluster(2)
 
-    assert RaftedValue.run_command(leader, :inc     ) == {:ok, 0}
-    assert RaftedValue.run_command(leader, :inc     ) == {:ok, 1}
-    assert RaftedValue.run_command(leader, :inc     ) == {:ok, 2}
-    assert RaftedValue.run_command(leader, :inc     ) == {:ok, 3}
-    assert RaftedValue.run_command(leader, :get     ) == {:ok, 4}
-    assert RaftedValue.run_command(leader, {:set, 1}) == {:ok, 4}
-    assert RaftedValue.run_command(leader, :get     ) == {:ok, 1}
-    assert RaftedValue.run_command(leader, :inc     ) == {:ok, 1}
-    assert RaftedValue.run_command(leader, :inc     ) == {:ok, 2}
-    assert RaftedValue.run_command(leader, :get     ) == {:ok, 3}
+    assert RaftedValue.command(leader, :inc     ) == {:ok, 0}
+    assert RaftedValue.command(leader, :inc     ) == {:ok, 1}
+    assert RaftedValue.command(leader, :inc     ) == {:ok, 2}
+    assert RaftedValue.command(leader, :inc     ) == {:ok, 3}
+    assert RaftedValue.command(leader, :get     ) == {:ok, 4}
+    assert RaftedValue.command(leader, {:set, 1}) == {:ok, 4}
+    assert RaftedValue.command(leader, :get     ) == {:ok, 1}
+    assert RaftedValue.command(leader, :inc     ) == {:ok, 1}
+    assert RaftedValue.command(leader, :inc     ) == {:ok, 2}
+    assert RaftedValue.command(leader, :get     ) == {:ok, 3}
 
-    assert RaftedValue.run_command(follower1, :get) == {:error, {:not_leader, leader}}
-    assert RaftedValue.run_command(follower2, :get) == {:error, {:not_leader, leader}}
+    assert RaftedValue.command(follower1, :get) == {:error, {:not_leader, leader}}
+    assert RaftedValue.command(follower2, :get) == {:error, {:not_leader, leader}}
   end
 
   test "should not execute the same client requests with identical reference multiple times" do
     {leader, _} = make_cluster(2)
 
-    assert RaftedValue.run_command(leader, :get     ) == {:ok, 0}
-    assert RaftedValue.run_command(leader, {:set, 1}) == {:ok, 0}
-    assert RaftedValue.run_command(leader, {:set, 2}) == {:ok, 1}
-    assert RaftedValue.run_command(leader, :get     ) == {:ok, 2}
+    assert RaftedValue.command(leader, :get     ) == {:ok, 0}
+    assert RaftedValue.command(leader, {:set, 1}) == {:ok, 0}
+    assert RaftedValue.command(leader, {:set, 2}) == {:ok, 1}
+    assert RaftedValue.command(leader, :get     ) == {:ok, 2}
 
     ref = make_ref
-    assert RaftedValue.run_command(leader, :inc, 5000, ref) == {:ok, 2}
-    assert RaftedValue.run_command(leader, :inc, 5000, ref) == {:ok, 2}
-    assert RaftedValue.run_command(leader, :inc, 5000, ref) == {:ok, 2}
+    assert RaftedValue.command(leader, :inc, 5000, ref) == {:ok, 2}
+    assert RaftedValue.command(leader, :inc, 5000, ref) == {:ok, 2}
+    assert RaftedValue.command(leader, :inc, 5000, ref) == {:ok, 2}
 
-    assert RaftedValue.run_command(leader, :get) == {:ok, 3}
+    assert RaftedValue.command(leader, :get) == {:ok, 3}
   end
 
   test "1-member cluster should immediately respond to client requests" do
     {leader, _} = make_cluster(0)
-    assert RaftedValue.run_command(leader, :inc) == {:ok, 0}
+    assert RaftedValue.command(leader, :inc) == {:ok, 0}
     :timer.sleep(@conf.election_timeout) # should not step down after election timeout
-    assert RaftedValue.run_command(leader, :inc) == {:ok, 1}
+    assert RaftedValue.command(leader, :inc) == {:ok, 1}
     :timer.sleep(@conf.election_timeout)
-    assert RaftedValue.run_command(leader, :inc) == {:ok, 2}
+    assert RaftedValue.command(leader, :inc) == {:ok, 2}
   end
 
   test "3,4,5,6,7 member cluster should tolerate up to 1,1,2,2,3 follower failure" do
     [3, 4, 5, 6, 7] |> Enum.each(fn n_members ->
       {leader, followers} = make_cluster(n_members - 1)
-      assert RaftedValue.run_command(leader, {:set, 1}) == {:ok, 0}
-      assert RaftedValue.run_command(leader, :get     ) == {:ok, 1}
+      assert RaftedValue.command(leader, {:set, 1}) == {:ok, 0}
+      assert RaftedValue.command(leader, :get     ) == {:ok, 1}
 
       followers_failing = Enum.take_random(followers, div(n_members - 1, 2))
       Enum.each(followers_failing, fn f ->
         assert :gen_fsm.stop(f) == :ok
         assert_received({:EXIT, ^f, :normal})
-        assert RaftedValue.run_command(leader, :get) == {:ok, 1}
+        assert RaftedValue.command(leader, :get) == {:ok, 1}
       end)
 
       # leader should not step down as long as it can access majority of members
@@ -260,7 +260,7 @@ defmodule RaftedValueTest do
       follower_threshold = Enum.random(followers -- followers_failing)
       assert :gen_fsm.stop(follower_threshold) == :ok
       assert_received({:EXIT, ^follower_threshold, :normal})
-      assert RaftedValue.run_command(leader, :get, 100) == {:error, :timeout}
+      assert RaftedValue.command(leader, :get, 100) == {:error, :timeout}
 
       # leader should step down if it cannot reach quorum for a while
       {:leader, _} = :sys.get_state(leader)
@@ -274,7 +274,7 @@ defmodule RaftedValueTest do
       {leader, followers} = make_cluster(n_members - 1)
       assert :gen_fsm.stop(leader) == :ok
       new_leader = wait_until_someone_elected_leader(followers)
-      assert RaftedValue.run_command(new_leader, :get) == {:ok, 0}
+      assert RaftedValue.command(new_leader, :get) == {:ok, 0}
     end)
   end
 
@@ -355,7 +355,7 @@ defmodule RaftedValueTest do
 
   defp run_command([], _cmd, _ref), do: :error
   defp run_command([member | members], cmd, ref) do
-    case RaftedValue.run_command(member, cmd, 500, ref) do
+    case RaftedValue.command(member, cmd, 500, ref) do
       {:ok, ret} -> {:ok, ret}
       {:error, {:not_leader, leader}} when is_pid(leader) ->
         members_to_ask = [leader | Enum.reject(members, &(&1 == leader))]
