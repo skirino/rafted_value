@@ -11,10 +11,11 @@ defmodule RaftedValueTest do
   end
 
   @conf RaftedValue.make_config(JustAnInt, [
-    max_retained_committed_logs:  10,
-    max_retained_command_results: 10,
-    heartbeat_timeout:            100,
-    election_timeout:             500,
+    heartbeat_timeout:                   100,
+    election_timeout:                    500,
+    election_timeout_clock_drift_margin: 100,
+    max_retained_committed_logs:         10,
+    max_retained_command_results:        10,
   ])
 
   @t_max_election_timeout @conf.election_timeout * 2

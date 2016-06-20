@@ -23,14 +23,16 @@ defmodule RaftedValue do
   end
 
   defun make_config(command_module :: g[atom], opts :: Keyword.t(any) \\ []) :: Config.t do
+    election_timeout = Keyword.get(opts, :election_timeout, 1000)
     %Config{
-      command_module:               command_module,
-      leader_hook_module:           Keyword.get(opts, :leader_hook_module          , RaftedValue.LeaderHook.NoOp),
-      communication_module:         Keyword.get(opts, :communication_module        , :gen_fsm),
-      heartbeat_timeout:            Keyword.get(opts, :heartbeat_timeout           , 200),
-      election_timeout:             Keyword.get(opts, :election_timeout            , 1000),
-      max_retained_committed_logs:  Keyword.get(opts, :max_retained_committed_logs , 100),
-      max_retained_command_results: Keyword.get(opts, :max_retained_command_results, 100),
+      command_module:                      command_module,
+      leader_hook_module:                  Keyword.get(opts, :leader_hook_module                 , RaftedValue.LeaderHook.NoOp),
+      communication_module:                Keyword.get(opts, :communication_module               , :gen_fsm),
+      heartbeat_timeout:                   Keyword.get(opts, :heartbeat_timeout                  , 200),
+      election_timeout:                    election_timeout,
+      election_timeout_clock_drift_margin: Keyword.get(opts, :election_timeout_clock_drift_margin, election_timeout),
+      max_retained_committed_logs:         Keyword.get(opts, :max_retained_committed_logs        , 100),
+      max_retained_command_results:        Keyword.get(opts, :max_retained_command_results       , 100),
     } |> Config.validate!
   end
 

@@ -2,13 +2,14 @@ use Croma
 
 defmodule RaftedValue.Config do
   use Croma.Struct, fields: [
-    command_module:               Croma.Atom,
-    leader_hook_module:           Croma.Atom,
-    communication_module:         Croma.Atom,
-    heartbeat_timeout:            Croma.PosInteger,
-    election_timeout:             Croma.PosInteger, # minimum value; actual timeout is randomly picked from `election_timeout .. 2 * election_timeout`
-    max_retained_committed_logs:  Croma.PosInteger,
-    max_retained_command_results: Croma.PosInteger,
+    command_module:                      Croma.Atom,
+    leader_hook_module:                  Croma.Atom,
+    communication_module:                Croma.Atom,
+    heartbeat_timeout:                   Croma.PosInteger,
+    election_timeout:                    Croma.PosInteger, # minimum value; actual timeout is randomly picked from `election_timeout .. 2 * election_timeout`
+    election_timeout_clock_drift_margin: Croma.PosInteger,
+    max_retained_committed_logs:         Croma.PosInteger,
+    max_retained_command_results:        Croma.PosInteger,
   ]
 end
 

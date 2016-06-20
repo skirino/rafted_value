@@ -57,10 +57,11 @@ defmodule RaftedValue.Election do
   end
 
   defun minimum_timeout_elapsed_since_last_leader_message?(%__MODULE__{leader_message_at: t},
-                                                           %Config{election_timeout: timeout}) :: boolean do
+                                                           %Config{election_timeout: timeout,
+                                                                   election_timeout_clock_drift_margin: margin}) :: boolean do
     case t do
       nil -> true
-      t   -> monotonic_millis - t > timeout - 100
+      t   -> t + timeout - margin <= monotonic_millis
     end
   end
 
