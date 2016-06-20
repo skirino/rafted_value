@@ -76,6 +76,11 @@ defmodule RaftedValue.Leadership do
     end
   end
 
+  defun minimum_timeout_elapsed_since_quorum_responded?(%__MODULE__{quorum_timer_started_at: t},
+                                                        %Config{election_timeout: timeout}) :: boolean do
+    t + timeout < monotonic_millis
+  end
+
   defunp monotonic_millis :: integer do
     System.monotonic_time(:milli_seconds)
   end

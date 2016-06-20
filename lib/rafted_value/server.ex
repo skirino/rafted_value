@@ -325,7 +325,7 @@ defmodule RaftedValue.Server do
   defp become_candidate_and_start_new_election(%State{members: members, current_term: term, election: election, config: config} = state,
                                                replacing_leader? \\ false) do
     new_members  = Members.put_leader(members, nil)
-    new_election = Election.replace_for_candidate(election, config)
+    new_election = Election.update_for_candidate(election, config)
     new_state = %State{state | members: new_members, current_term: term + 1, election: new_election}
     broadcast_request_vote(new_state, replacing_leader?)
     next_state(new_state, :candidate)
@@ -379,7 +379,7 @@ defmodule RaftedValue.Server do
     become_follower_if_new_term_started(rpc, state, fn ->
       logs = Logs.new_for_new_follower(last_entry)
       %State{state | members: members, current_term: term, logs: logs, data: data, command_results: command_results}
-      |> reset_election_timer
+      |> reset_election_timer_on_leader_message
       |> same_fsm_state
     end)
   end
@@ -409,7 +409,7 @@ defmodule RaftedValue.Server do
                                    new_term :: TermNumber.t) :: State.t do
     if leadership, do: Leadership.stop_timers(leadership)
     new_members  = Members.put_leader(members, nil)
-    new_election = Election.replace_for_follower(election, config)
+    new_election = Election.update_for_follower(election, config)
     %State{state | members: new_members, current_term: new_term, leadership: nil, election: new_election}
   end
 
@@ -443,28 +443,35 @@ defmodule RaftedValue.Server do
         new_members = Members.put_leader(members, leader_pid)
         %State{state | members: new_members, current_term: term}
       end
-      |> reset_election_timer
+      |> reset_election_timer_on_leader_message
       |> next_state(:follower)
     end
   end
 
-  defp handle_request_vote_request(%RequestVoteRequest{term: term, candidate_pid: candidate, last_log: last_log} = rpc,
+  defp handle_request_vote_request(%RequestVoteRequest{term: term, candidate_pid: candidate, last_log: last_log, replacing_leader: replacing?} = rpc,
                                    %State{current_term: current_term, election: election, logs: logs, config: config} = state,
                                    current_state_name) do
-    become_follower_if_new_term_started(rpc, state, fn ->
-      grant_vote? = (
-        term == current_term                   and # the case `term > current_term` is covered by `become_follower_if_new_term_started`
-        election.voted_for in [nil, candidate] and
-        Logs.candidate_log_up_to_date?(logs, last_log))
-      response = %RequestVoteResponse{from: self, term: current_term, vote_granted: grant_vote?}
+    if replacing? or leader_authority_valid?(current_state_name, state) do
+      become_follower_if_new_term_started(rpc, state, fn ->
+        grant_vote? = (
+          term == current_term                   and # the case `term > current_term` is covered by `become_follower_if_new_term_started`
+          election.voted_for in [nil, candidate] and
+          Logs.candidate_log_up_to_date?(logs, last_log))
+        response = %RequestVoteResponse{from: self, term: current_term, vote_granted: grant_vote?}
+        send_event(state, candidate, response)
+        if grant_vote? do
+          %State{state | election: Election.vote_for(election, candidate, config)}
+        else
+          state
+        end
+        |> next_state(current_state_name)
+      end)
+    else
+      # Reject vote request if leader lease has not yet expired
+      response = %RequestVoteResponse{from: self, term: current_term, vote_granted: false}
       send_event(state, candidate, response)
-      if grant_vote? do
-        %State{state | election: Election.vote_for(election, candidate, config)}
-      else
-        state
-      end
-      |> next_state(current_state_name)
-    end)
+      next_state(state, current_state_name)
+    end
   end
 
   #
@@ -515,8 +522,15 @@ defmodule RaftedValue.Server do
     %State{state | leadership: Leadership.reset_heartbeat_timer(leadership, config)}
   end
 
-  defunp reset_election_timer(%State{election: election, config: config} = state) :: State.t do
+  defunp reset_election_timer_on_leader_message(%State{election: election, config: config} = state) :: State.t do
     %State{state | election: Election.reset_timer(election, config)}
+  end
+
+  defunp leader_authority_valid?(current_state_name, state) :: boolean do
+    (:leader, %State{leadership: leadership, config: config}) ->
+      Leadership.minimum_timeout_elapsed_since_quorum_responded?(leadership, config)
+    (_, %State{election: election, config: config}) ->
+      Election.minimum_timeout_elapsed_since_last_leader_message?(election, config)
   end
 
   defunp leader_apply_committed_log_entry(entry :: LogEntry.t,

@@ -5,9 +5,10 @@ defmodule RaftedValue.Election do
   alias RaftedValue.{PidSet, Members, Config}
 
   use Croma.Struct, fields: [
-    voted_for: TG.nilable(Croma.Pid),
-    votes:     TG.nilable(PidSet),
-    timer:     TG.nilable(Croma.Reference),
+    voted_for:         TG.nilable(Croma.Pid),
+    votes:             TG.nilable(PidSet),
+    timer:             TG.nilable(Croma.Reference),
+    leader_message_at: TG.nilable(Croma.Integer),
   ]
 
   defun new_for_leader :: t do
@@ -15,18 +16,18 @@ defmodule RaftedValue.Election do
   end
 
   defun new_for_follower(config :: Config.t) :: t do
-    %__MODULE__{timer: start_timer(config)}
+    %__MODULE__{timer: start_timer(config), leader_message_at: monotonic_millis}
   end
 
-  defun replace_for_candidate(%__MODULE__{timer: timer}, config :: Config.t) :: t do
+  defun update_for_candidate(%__MODULE__{timer: timer} = e, config :: Config.t) :: t do
     if timer, do: :gen_fsm.cancel_timer(timer)
     votes = PidSet.new |> PidSet.put(self)
-    %__MODULE__{voted_for: self, votes: votes, timer: start_timer(config)}
+    %__MODULE__{e | voted_for: self, votes: votes, timer: start_timer(config)}
   end
 
-  defun replace_for_follower(%__MODULE__{timer: timer}, config :: Config.t) :: t do
+  defun update_for_follower(%__MODULE__{timer: timer} = e, config :: Config.t) :: t do
     if timer, do: :gen_fsm.cancel_timer(timer)
-    new_for_follower(config)
+    %__MODULE__{e | voted_for: nil, votes: nil, timer: start_timer(config)}
   end
 
   defun vote_for(%__MODULE__{timer: timer} = e, candidate :: pid, config :: Config.t) :: t do
@@ -47,11 +48,23 @@ defmodule RaftedValue.Election do
 
   defun reset_timer(%__MODULE__{timer: timer} = e, config :: Config.t) :: t do
     if timer, do: :gen_fsm.cancel_timer(timer)
-    %__MODULE__{e | timer: start_timer(config)}
+    %__MODULE__{e | timer: start_timer(config), leader_message_at: monotonic_millis}
   end
 
   defunp start_timer(%Config{election_timeout: timeout}) :: reference do
     randomized_timeout = timeout + :rand.uniform(timeout)
     :gen_fsm.send_event_after(randomized_timeout, :election_timeout)
+  end
+
+  defun minimum_timeout_elapsed_since_last_leader_message?(%__MODULE__{leader_message_at: t},
+                                                           %Config{election_timeout: timeout}) :: boolean do
+    case t do
+      nil -> true
+      t   -> monotonic_millis - t > timeout - 100
+    end
+  end
+
+  defunp monotonic_millis :: integer do
+    System.monotonic_time(:milli_seconds)
   end
 end

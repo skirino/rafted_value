@@ -277,6 +277,31 @@ defmodule RaftedValueTest do
     end)
   end
 
+  test "should reject vote request from disruptive ex-member as long as leader is working fine" do
+    defmodule DropRemoveFollowerCompleted do
+      def send_event(_server, :remove_follower_completed), do: :ok
+      def send_event(server, event), do: :gen_fsm.send_event(server, event)
+      def reply(from, reply), do: :gen_fsm.reply(from, reply)
+    end
+
+    config = Map.put(@conf, :communication_module, DropRemoveFollowerCompleted)
+    {leader, [follower1, follower2]} = make_cluster(2, config)
+
+    get_term = fn(pid) ->
+      {_, state} = :sys.get_state(pid)
+      state.current_term
+    end
+    leader_term = get_term.(leader)
+    assert get_term.(follower2) == leader_term
+
+    assert RaftedValue.remove_follower(leader, follower1) == :ok
+    :timer.sleep(@t_max_election_timeout)
+    assert Process.alive?(follower1) # :remove_follower_completed message is somehow dropped and `follower1` is still alive
+    {:leader, _} = :sys.get_state(leader)
+    assert get_term.(leader) == leader_term
+    assert get_term.(follower2) == leader_term
+  end
+
   test "other callbacks just do irrelevant things" do
     {leader, followers} = make_cluster(2)
 
