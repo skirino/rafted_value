@@ -8,6 +8,7 @@ defmodule RaftedValueTest do
     def command(i, :get     ), do: {i, i    }
     def command(i, {:set, j}), do: {i, j    }
     def command(i, :inc     ), do: {i, i + 1}
+    def query(i, :get), do: i
   end
 
   @conf RaftedValue.make_config(JustAnInt, [
@@ -209,9 +210,25 @@ defmodule RaftedValueTest do
     assert RaftedValue.command(leader, :inc     ) == {:ok, 1}
     assert RaftedValue.command(leader, :inc     ) == {:ok, 2}
     assert RaftedValue.command(leader, :get     ) == {:ok, 3}
+    assert RaftedValue.query(  leader, :get     ) == {:ok, 3}
 
     assert RaftedValue.command(follower1, :get) == {:error, {:not_leader, leader}}
+    assert RaftedValue.query(  follower1, :get) == {:error, {:not_leader, leader}}
     assert RaftedValue.command(follower2, :get) == {:error, {:not_leader, leader}}
+    assert RaftedValue.query(  follower2, :get) == {:error, {:not_leader, leader}}
+  end
+
+  test "read-only query should be handled in the same way as command when election_timeout_clock_drift_margin is large" do
+    config = Map.put(@conf, :election_timeout_clock_drift_margin, @conf.election_timeout)
+    {leader, [follower1, follower2]} = make_cluster(2, config)
+
+    assert RaftedValue.command(leader , :inc) == {:ok, 0}
+    assert RaftedValue.command(leader , :get) == {:ok, 1}
+    assert RaftedValue.query(  leader , :get) == {:ok, 1}
+    :timer.sleep(100) # for coverage: wait until :query log entry is applied in follwers
+    assert RaftedValue.query(  leader , :get) == {:ok, 1}
+    assert RaftedValue.query(follower1, :get) == {:error, {:not_leader, leader}}
+    assert RaftedValue.query(follower2, :get) == {:error, {:not_leader, leader}}
   end
 
   test "should not execute the same client requests with identical reference multiple times" do
@@ -233,10 +250,13 @@ defmodule RaftedValueTest do
   test "1-member cluster should immediately respond to client requests" do
     {leader, _} = make_cluster(0)
     assert RaftedValue.command(leader, :inc) == {:ok, 0}
+    assert RaftedValue.query(  leader, :get) == {:ok, 1}
     :timer.sleep(@conf.election_timeout) # should not step down after election timeout
     assert RaftedValue.command(leader, :inc) == {:ok, 1}
+    assert RaftedValue.query(  leader, :get) == {:ok, 2}
     :timer.sleep(@conf.election_timeout)
     assert RaftedValue.command(leader, :inc) == {:ok, 2}
+    assert RaftedValue.query(  leader, :get) == {:ok, 3}
   end
 
   test "3,4,5,6,7 member cluster should tolerate up to 1,1,2,2,3 follower failure" do
@@ -244,12 +264,14 @@ defmodule RaftedValueTest do
       {leader, followers} = make_cluster(n_members - 1)
       assert RaftedValue.command(leader, {:set, 1}) == {:ok, 0}
       assert RaftedValue.command(leader, :get     ) == {:ok, 1}
+      assert RaftedValue.query(  leader, :get     ) == {:ok, 1}
 
       followers_failing = Enum.take_random(followers, div(n_members - 1, 2))
       Enum.each(followers_failing, fn f ->
         assert :gen_fsm.stop(f) == :ok
         assert_received({:EXIT, ^f, :normal})
         assert RaftedValue.command(leader, :get) == {:ok, 1}
+        assert RaftedValue.query(  leader, :get) == {:ok, 1}
       end)
 
       # leader should not step down as long as it can access majority of members
@@ -260,7 +282,9 @@ defmodule RaftedValueTest do
       follower_threshold = Enum.random(followers -- followers_failing)
       assert :gen_fsm.stop(follower_threshold) == :ok
       assert_received({:EXIT, ^follower_threshold, :normal})
-      assert RaftedValue.command(leader, :get, 100) == {:error, :timeout}
+      assert RaftedValue.command(leader, :get, 50) == {:error, :timeout}
+      # read-only query succeeds if it is processed within leader's lease
+      assert RaftedValue.query(  leader, :get, 50) == {:ok, 1}
 
       # leader should step down if it cannot reach quorum for a while
       {:leader, _} = :sys.get_state(leader)
@@ -275,6 +299,7 @@ defmodule RaftedValueTest do
       assert :gen_fsm.stop(leader) == :ok
       new_leader = wait_until_someone_elected_leader(followers)
       assert RaftedValue.command(new_leader, :get) == {:ok, 0}
+      assert RaftedValue.query(  new_leader, :get) == {:ok, 0}
     end)
   end
 
@@ -329,13 +354,17 @@ defmodule RaftedValueTest do
       5 ->
         {cmd, ref, tries} =
           case pending_cmd_tuple do
-            nil                  -> {pick_command, make_ref, 20}
+            nil                  -> {pick_data_manipulation, make_ref, 20}
             {_cmd, _ref, 0}      -> raise "No leader found, something is wrong!"
             {_cmd, _ref, _tries} -> pending_cmd_tuple
           end
-        case run_command(members, cmd, ref) do
+        case run_client_request(members, cmd, ref) do
           {:ok, ret} ->
-            {expected_ret, new_value} = JustAnInt.command(value, cmd)
+            {expected_ret, new_value} =
+              case cmd do
+                {:command, arg} -> JustAnInt.command(value, arg)
+                {:query  , arg} -> {JustAnInt.query(value, arg), value}
+              end
             assert ret == expected_ret
             client_process_loop(members, new_value)
           :error ->
@@ -345,24 +374,31 @@ defmodule RaftedValueTest do
     end
   end
 
-  defp pick_command do
+  defp pick_data_manipulation do
     Enum.random([
-      :get,
-      {:set, :rand.uniform(10)},
-      :inc,
+      {:command, {:set, :rand.uniform(10)}},
+      {:command, :inc},
+      {:query, :get},
     ])
   end
 
-  defp run_command([], _cmd, _ref), do: :error
-  defp run_command([member | members], cmd, ref) do
-    case RaftedValue.command(member, cmd, 500, ref) do
+  defp run_client_request([], _cmd, _ref), do: :error
+  defp run_client_request([member | members], cmd, ref) do
+    case call_client_request(member, cmd, ref) do
       {:ok, ret} -> {:ok, ret}
       {:error, {:not_leader, leader}} when is_pid(leader) ->
         members_to_ask = [leader | Enum.reject(members, &(&1 == leader))]
-        run_command(members_to_ask, cmd, ref)
+        run_client_request(members_to_ask, cmd, ref)
       {:error, _} ->
-        run_command(members, cmd, ref)
+        run_client_request(members, cmd, ref)
     end
+  end
+
+  defp call_client_request(member, {:command, arg}, ref) do
+    RaftedValue.command(member, arg, 500, ref)
+  end
+  defp call_client_request(member, {:query, arg}, _ref) do
+    RaftedValue.query(member, arg, 500)
   end
 
   defp assert_invariants(%{working: working, isolated: isolated} = context) do

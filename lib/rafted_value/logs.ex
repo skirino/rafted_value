@@ -4,10 +4,11 @@ alias Croma.Result, as: R
 
 defmodule RaftedValue.LogEntry do
   alias RaftedValue.{TermNumber, LogIndex}
-  @type t :: {TermNumber.t, LogIndex.t, :leader_elected , pid}
+  @type t :: {TermNumber.t, LogIndex.t, :command        , {GenServer.from, Data.command_arg, reference}}
+           | {TermNumber.t, LogIndex.t, :query          , {GenServer.from, Data.query_arg}}
+           | {TermNumber.t, LogIndex.t, :leader_elected , pid}
            | {TermNumber.t, LogIndex.t, :add_follower   , pid}
            | {TermNumber.t, LogIndex.t, :remove_follower, pid}
-           | {TermNumber.t, LogIndex.t, :command        , {GenServer.from, any, reference}}
 
   defun validate(v :: any) :: R.t(t) do
     {_, _, _, _} = t -> {:ok, t}

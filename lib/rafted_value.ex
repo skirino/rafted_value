@@ -1,7 +1,7 @@
 use Croma
 
 defmodule RaftedValue do
-  alias RaftedValue.{TermNumber, Config, Server}
+  alias RaftedValue.{TermNumber, Config, Server, Data}
 
   @type consensus_group_info :: {:create_new_consensus_group, Config.t} | {:join_existing_consensus_group, [GenServer.server]}
 
@@ -22,10 +22,10 @@ defmodule RaftedValue do
     end
   end
 
-  defun make_config(command_module :: g[atom], opts :: Keyword.t(any) \\ []) :: Config.t do
+  defun make_config(data_module :: g[atom], opts :: Keyword.t(any) \\ []) :: Config.t do
     election_timeout = Keyword.get(opts, :election_timeout, 1000)
     %Config{
-      command_module:                      command_module,
+      data_module:                         data_module,
       leader_hook_module:                  Keyword.get(opts, :leader_hook_module                 , RaftedValue.LeaderHook.NoOp),
       communication_module:                Keyword.get(opts, :communication_module               , :gen_fsm),
       heartbeat_timeout:                   Keyword.get(opts, :heartbeat_timeout                  , 200),
@@ -50,13 +50,22 @@ defmodule RaftedValue do
   @type command_identifier :: reference | any
 
   defun command(leader      :: GenServer.server,
-                command_arg :: RaftedValue.Data.command_arg,
+                command_arg :: Data.command_arg,
                 timeout     :: timeout \\ 5000,
-                id          :: command_identifier \\ make_ref) :: {:ok, any} | {:error, atom} do
+                id          :: command_identifier \\ make_ref) :: {:ok, Data.command_ret} | {:error, atom} do
     catch_exit(fn ->
       :gen_fsm.sync_send_event(leader, {:command, command_arg, id}, timeout)
     end)
   end
+
+  defun query(leader    :: GenServer.server,
+              query_arg :: RaftedValue.Data.query_arg,
+              timeout   :: timeout \\ 5000) :: {:ok, Data.query_ret} | {:error, atom} do
+    catch_exit(fn ->
+      :gen_fsm.sync_send_event(leader, {:query, query_arg}, timeout)
+    end)
+  end
+
 
   defp catch_exit(f) do
     try do

@@ -25,6 +25,7 @@ defmodule RaftedValue.Server do
   #     - :remove_follower_completed
   # - sync (client-to-leader messages)
   #   - {:command, arg, cmd_id}
+  #   - {:query, arg}
   #   - {:add_follower, pid}
   #   - {:remove_follower, pid}
   #   - {:replace_leader, new_leader}
@@ -94,7 +95,7 @@ defmodule RaftedValue.Server do
   # initialization
   #
   def init({:create_new_consensus_group, config}) do
-    data        = config.command_module.new
+    data        = config.data_module.new
     logs        = Logs.new_for_lonely_leader
     members     = Members.new_for_lonely_leader
     leadership  = Leadership.new_for_leader(config)
@@ -190,6 +191,19 @@ defmodule RaftedValue.Server do
     %State{state | logs: new_logs}
     |> broadcast_append_entries
     |> same_fsm_state
+  end
+  def leader({:query, arg}, from, %State{current_term: term, leadership: leadership, logs: logs, config: config} = state) do
+    if Leadership.minimum_timeout_elapsed_since_quorum_responded?(leadership, config) do
+      # if leader's lease has already expired, fall back to log replication (handled in the same way as commands)
+      new_logs = Logs.add_entry(logs, config, fn index -> {term, index, :query, {from, arg}} end)
+      %State{state | logs: new_logs}
+      |> broadcast_append_entries
+      |> same_fsm_state
+    else
+      # with valid lease, leader can respond by itself
+      run_query(state, {from, arg})
+      same_fsm_state(state)
+    end
   end
   def leader({:add_follower, new_follower},
              from,
@@ -318,7 +332,7 @@ defmodule RaftedValue.Server do
   end
 
   def candidate(_event, _from, %State{members: members} = state) do
-    # non-leader rejects synchronous events: `{:command, arg, cmd_id}`, `{:add_follower, pid}` and `{:remove_follower, pid}`
+    # non-leader rejects synchronous events: `{:command, arg, cmd_id}`, `{:query, arg}`, `{:add_follower, pid}` and `{:remove_follower, pid}`
     same_fsm_state_reply(state, {:error, {:not_leader, members.leader}})
   end
 
@@ -388,7 +402,7 @@ defmodule RaftedValue.Server do
   end
 
   def follower(_event, _from, %State{members: members} = state) do
-    # non-leader rejects synchronous events: `{:command, arg, cmd_id}`, `{:add_follower, pid}` and `{:remove_follower, pid}`
+    # non-leader rejects synchronous events: `{:command, arg, cmd_id}`, `{:query, arg}`, `{:add_follower, pid}` and `{:remove_follower, pid}`
     same_fsm_state_reply(state, {:error, {:not_leader, members.leader}})
   end
 
@@ -538,6 +552,9 @@ defmodule RaftedValue.Server do
     case entry do
       {_term, _index, :command, tuple} ->
         run_command(state, tuple, true)
+      {_term, _index, :query, tuple} ->
+        run_query(state, tuple)
+        state
       {_term, _index, :leader_elected, leader_pid} ->
         if leader_pid == self, do: hook.on_elected
         state
@@ -554,6 +571,7 @@ defmodule RaftedValue.Server do
   defunp nonleader_apply_committed_log_entry(entry :: LogEntry.t, %State{members: members} = state) :: State.t do
     case entry do
       {_term, _index, :command        , tuple        } -> run_command(state, tuple, false)
+      {_term, _index, :query          , _tuple       } -> state
       {_term, _index, :leader_elected , _leader_pid  } -> state
       {_term, index , :add_follower   , _follower_pid} -> %State{state | members: Members.membership_change_committed(members, index)}
       {_term, index , :remove_follower, _follower_pid} -> %State{state | members: Members.membership_change_committed(members, index)}
@@ -567,7 +585,7 @@ defmodule RaftedValue.Server do
         if leader?, do: reply(state, client, {:ok, result})
         state
       :error ->
-        %Config{command_module: mod, leader_hook_module: hook, max_retained_command_results: max} = config
+        %Config{data_module: mod, leader_hook_module: hook, max_retained_command_results: max} = config
         {result, new_data} = mod.command(data, arg)
         new_command_results = CommandResults.put(command_results, cmd_id, result, max)
         if leader? do
@@ -576,5 +594,10 @@ defmodule RaftedValue.Server do
         end
         %State{state | data: new_data, command_results: new_command_results}
     end
+  end
+
+  defp run_query(%State{data: data, config: %Config{data_module: mod}} = state, {client, arg}) do
+    ret = mod.query(data, arg)
+    reply(state, client, {:ok, ret})
   end
 end
