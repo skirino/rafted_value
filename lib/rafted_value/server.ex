@@ -604,8 +604,9 @@ defmodule RaftedValue.Server do
     end
   end
 
-  defp run_query(%State{data: data, config: %Config{data_module: mod}} = state, {client, arg}) do
+  defp run_query(%State{data: data, config: %Config{data_module: mod, leader_hook_module: hook}} = state, {client, arg}) do
     ret = mod.query(data, arg)
     reply(state, client, {:ok, ret})
+    hook.on_query_answered(data, arg, ret)
   end
 end

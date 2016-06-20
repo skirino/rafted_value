@@ -573,6 +573,7 @@ defmodule RaftedValueTest do
   defmodule MessageSendingHook do
     @behaviour RaftedValue.LeaderHook
     def on_command_committed(_, _, _, _), do: nil
+    def on_query_answered(_, _, _)      , do: nil
     def on_follower_added(pid)          , do: send(:test_runner, {:follower_added, pid})
     def on_follower_removed(pid)        , do: send(:test_runner, {:follower_removed, pid})
     def on_elected                      , do: send(:test_runner, {:elected, self})
