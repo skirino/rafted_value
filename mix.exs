@@ -38,7 +38,7 @@ defmodule RaftedValue.Mixfile do
       files:       ["lib", "mix.exs", "README.md", "LICENSE"],
       maintainers: ["Shunsuke Kirino"],
       licenses:    ["MIT"],
-      links:       %{"GitHub repository" => @github_url, "Doc" => "http://hexdocs.pm/rafted_value/"},
+      links:       %{"GitHub repository" => @github_url},
     ]
   end
 end
