@@ -518,7 +518,7 @@ defmodule RaftedValueTest do
   def op_add_follower(context) do
     leader = context.current_leader
     new_follower = add_follower(leader)
-    assert_receive({:follower_added, pid}, @t_max_election_timeout)
+    assert_receive({:follower_added, _pid}, @t_max_election_timeout)
     %{context | working: [new_follower | context.working]}
   end
 

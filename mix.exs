@@ -6,11 +6,10 @@ defmodule RaftedValue.Mixfile do
   def project do
     [
       app:             :rafted_value,
-      version:         "0.1.0",
+      version:         "0.1.1",
       elixir:          "~> 1.2",
       build_embedded:  Mix.env == :prod,
       start_permanent: Mix.env == :prod,
-      compilers:       compilers,
       deps:            deps,
       description:     "Replicated and synchronized values wrapped by processes",
       package:         package,
@@ -24,19 +23,13 @@ defmodule RaftedValue.Mixfile do
     [applications: [:croma]]
   end
 
-  defp compilers do
-    additional = if Mix.env == :prod, do: [], else: [:exref]
-    Mix.compilers ++ additional
-  end
-
   defp deps do
     [
       {:croma  , "~> 0.4"},
-      {:exref  , "~> 0.1" , only: [:dev, :test]},
       {:coverex, "~> 1.4" , only: :test},
       {:dialyze, "~> 0.2" , only: :dev },
       {:earmark, "~> 0.2" , only: :dev },
-      {:ex_doc , "~> 0.11", only: :dev },
+      {:ex_doc , "~> 0.12", only: :dev },
     ]
   end
 

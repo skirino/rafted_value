@@ -83,7 +83,7 @@ defmodule RaftedValue.Leadership do
   end
 
   defunp monotonic_millis :: integer do
-    System.monotonic_time(:milli_seconds)
+    :erlang.monotonic_time(:milli_seconds)
   end
 
   defunp max_election_timeout(%Config{election_timeout: t}) :: pos_integer do

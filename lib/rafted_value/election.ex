@@ -66,6 +66,6 @@ defmodule RaftedValue.Election do
   end
 
   defunp monotonic_millis :: integer do
-    System.monotonic_time(:milli_seconds)
+    :erlang.monotonic_time(:milli_seconds)
   end
 end
