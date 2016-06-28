@@ -46,10 +46,10 @@ defmodule RaftedValue do
   - `leader_hook_module`: An implementation of `RaftedValue.LeaderHook`. Defaults to `RaftedValue.LeaderHook.NoOp`.
   - `communication_module`: A module to define member-to-member async communication (`send_event/2` and `reply/2`).
     This is configurable for internal testing purpose. Defaults to `:gen_fsm`.
-  - `heartbeat_timeout`: Raft's heartbeat timeout in milliseconds. Defaults to `1000`.
+  - `heartbeat_timeout`: Raft's heartbeat timeout in milliseconds. Defaults to `200`.
   - `election_timeout`: Raft's leader election timeout in milliseconds.
     The acrual timeout value in each member is randomly chosen from `election_timeout .. 2 * election_timeout`.
-    Defaults to `200`.
+    Defaults to `1000`.
   - `election_timeout_clock_drift_margin`: A time margin in milliseconds to judge whether leader lease has expired or not.
     When a leader gets responses from majority it gets a lease for `election_timeout - margin`.
     During the lease the leader can assume that no other members have elected leader.
