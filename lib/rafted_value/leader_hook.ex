@@ -29,24 +29,24 @@ defmodule RaftedValue.LeaderHook do
   Hook to be called when a new follower is added to a consensus group
   by `RaftedValue.start_link/2` with `:join_existing_consensus_group` specified.
   """
-  @callback on_follower_added(pid) :: neglected
+  @callback on_follower_added(Data.data, pid) :: neglected
 
   @doc """
   Hook to be called when a follower is removed from a consensus group by `RaftedValue.remove_follower/2`.
   """
-  @callback on_follower_removed(pid) :: neglected
+  @callback on_follower_removed(Data.data, pid) :: neglected
 
   @doc """
   Hook to be called when a new leader is elected in a consensus group.
   """
-  @callback on_elected :: neglected
+  @callback on_elected(Data.data) :: neglected
 end
 
 defmodule RaftedValue.LeaderHook.NoOp do
   @behaviour RaftedValue.LeaderHook
   def on_command_committed(_, _, _, _), do: nil
   def on_query_answered(_, _, _), do: nil
-  def on_follower_added(_), do: nil
-  def on_follower_removed(_), do: nil
-  def on_elected, do: nil
+  def on_follower_added(_, _), do: nil
+  def on_follower_removed(_, _), do: nil
+  def on_elected(_), do: nil
 end

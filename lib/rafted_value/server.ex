@@ -552,7 +552,7 @@ defmodule RaftedValue.Server do
   end
 
   defunp leader_apply_committed_log_entry(entry :: LogEntry.t,
-                                          %State{members: members, config: %Config{leader_hook_module: hook}} = state) :: State.t do
+                                          %State{members: members, data: data, config: %Config{leader_hook_module: hook}} = state) :: State.t do
     case entry do
       {_term, _index, :command, tuple} ->
         run_command(state, tuple, true)
@@ -560,14 +560,14 @@ defmodule RaftedValue.Server do
         run_query(state, tuple)
         state
       {_term, _index, :leader_elected, leader_pid} ->
-        if leader_pid == self, do: hook.on_elected
+        if leader_pid == self, do: hook.on_elected(data)
         state
       {_term, index , :add_follower, follower_pid} ->
-        hook.on_follower_added(follower_pid)
+        hook.on_follower_added(data, follower_pid)
         %State{state | members: Members.membership_change_committed(members, index)}
       {_term, index , :remove_follower, follower_pid} ->
         send_event(state, follower_pid, :remove_follower_completed) # don't use :gen_fsm.stop in order to stop `follower_pid` only when it's actually a follower
-        hook.on_follower_removed(follower_pid)
+        hook.on_follower_removed(data, follower_pid)
         %State{state | members: Members.membership_change_committed(members, index)}
     end
   end

@@ -10,12 +10,11 @@
 ## Design
 
 - Provides [linearizable](https://en.wikipedia.org/wiki/Linearizability) semantics for operations on a stored value.
-- Memory-based, no persisted state.
-    - You can think of this as a cluster-wide variant of [`Agent`](http://elixir-lang.org/docs/stable/elixir/Agent.html).
-- Membership changes:
-    - Supports only changes of one member at a time.
-    - Supports replacing master.
-- Each consensus group member is a [`:gen_fsm`](http://erlang.org/doc/man/gen_fsm.html) process.
+- Memory-based, no persisted state; restarted members must catch up with its leader from scratch.
+- Supports membership changes:
+    - adding/removing a member
+    - replacing leader
+- Each consensus group member is implemented as a [`:gen_fsm`](http://erlang.org/doc/man/gen_fsm.html) process.
 
 ## Example
 
