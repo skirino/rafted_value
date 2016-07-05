@@ -45,6 +45,7 @@ defmodule QueueWithLength do
     {{:value, v}, q2} = :queue.out(q1)
     {v, {q2, l - 1}}
   end
+  def query({_, l}, :length), do: l
 end
 ```
 
@@ -79,6 +80,8 @@ iex(bar@skirino-Manjaro)5> RaftedValue.command({:foo, :"foo@skirino-Manjaro"}, :
 {:ok, 2}
 iex(bar@skirino-Manjaro)6> RaftedValue.command({:foo, :"foo@skirino-Manjaro"}, {:enqueue, 6})
 {:ok, 3}
+iex(bar@skirino-Manjaro)7> RaftedValue.query({:foo, :"foo@skirino-Manjaro"}, :length)
+{:ok, 4}
 ```
 
 The 3-member consensus group keeps on working if 1 member dies:
