@@ -52,8 +52,8 @@ defmodule RaftedValue do
     Defaults to `1000`.
   - `election_timeout_clock_drift_margin`: A time margin in milliseconds to judge whether leader lease has expired or not.
     When a leader gets responses from majority it gets a lease for `election_timeout - margin`.
-    During the lease the leader can assume that no other members have elected leader.
-    This enables the leader to skip message round trip during processing read-only query.
+    During the lease time the leader can assume that no other members are ever elected leader.
+    This enables the leader to skip message round trips during processing read-only query.
     Defaults to the value of `election_timeout` (i.e. no lease time, disabling this clock-based optimization).
   - `max_retained_committed_logs`: Number of committed log entries to keep in each member. Defaults to `100`.
   - `max_retained_command_results`: Number of command results to be cached,
