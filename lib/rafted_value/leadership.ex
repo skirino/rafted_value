@@ -42,7 +42,7 @@ defmodule RaftedValue.Leadership do
     now = monotonic_millis
     new_times =
       Map.put(times, follower, now)
-      |> Map.take(PidSet.delete(all, self) |> PidSet.to_list)
+      |> Map.take(PidSet.delete(all, self) |> PidSet.to_list) # filter by the actual members not to be disturbed by e.g. delayed message from removed member
     new_leadership = %__MODULE__{l | follower_responded_times: new_times}
     n_responded_since_timer_set = Enum.count(new_times, fn {_, time} -> started_at < time end)
     if (n_responded_since_timer_set + 1) * 2 > PidSet.size(all) do
@@ -74,6 +74,10 @@ defmodule RaftedValue.Leadership do
       n_healthy_members_after_remove = n_members_after_remove - length(unhealthy_followers)
       n_healthy_members_after_remove * 2 > n_members_after_remove
     end
+  end
+
+  defun remove_follower_response_time_entry(%__MODULE__{follower_responded_times: times} = leadership, follower :: pid) :: t do
+    %__MODULE__{leadership | follower_responded_times: Map.delete(times, follower)}
   end
 
   defun minimum_timeout_elapsed_since_quorum_responded?(%__MODULE__{quorum_timer_started_at: t},

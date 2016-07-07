@@ -230,7 +230,8 @@ defmodule RaftedValue.Server do
       {:error, _} = e    -> same_fsm_state_reply(state, e)
       {:ok, new_members} ->
         if Leadership.can_safely_remove?(leadership, members, old_follower, config) do
-          %State{state | members: new_members, logs: new_logs}
+          new_leadership = Leadership.remove_follower_response_time_entry(leadership, old_follower)
+          %State{state | members: new_members, leadership: new_leadership, logs: new_logs}
           |> broadcast_append_entries
           |> same_fsm_state_reply(:ok)
         else

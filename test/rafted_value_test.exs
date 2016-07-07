@@ -144,6 +144,14 @@ defmodule RaftedValueTest do
     assert RaftedValue.remove_follower(leader, follower2) == {:error, :will_break_quorum}
   end
 
+  test "should remove target follower from unresponsive_follower list" do
+    {leader, [follower1]} = make_cluster(1)
+    assert RaftedValue.remove_follower(leader, follower1) == :ok
+    assert RaftedValue.status(leader)[:unresponsive_followers] == []
+    :timer.sleep(@t_max_election_timeout)
+    assert RaftedValue.status(leader)[:unresponsive_followers] == [] # removed follower should not be listed as unresponsive
+  end
+
   test "replace_leader should eventually replace leader" do
     {leader, [follower1, follower2]} = make_cluster(2)
 
