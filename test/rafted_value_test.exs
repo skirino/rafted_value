@@ -126,6 +126,11 @@ defmodule RaftedValueTest do
     assert :gen_fsm.sync_send_event(leader, {:add_follower, follower1}) == {:error, :already_joined}
   end
 
+  test "should report error when trying to remove leader" do
+    {leader, [_follower1, _follower2]} = make_cluster(2)
+    assert RaftedValue.remove_follower(leader, leader) == {:error, :cannot_remove_leader}
+  end
+
   test "should report error when trying to remove non member" do
     {:ok, leader} = RaftedValue.start_link({:create_new_consensus_group, @conf})
     assert RaftedValue.remove_follower(leader, self) == {:error, :not_member}

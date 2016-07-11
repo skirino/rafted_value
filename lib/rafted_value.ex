@@ -74,8 +74,8 @@ defmodule RaftedValue do
   end
 
   @type not_leader :: {:not_leader, nil | pid}
-  @type remove_follower_error_reason :: :uncommitted_membership_change | :not_member | :pending_leader_change | :will_break_quorum | not_leader
-  @type replace_leader_error_reason  :: :uncommitted_membership_change | :not_member | :new_leader_unresponsive | not_leader
+  @type remove_follower_error_reason :: not_leader | :uncommitted_membership_change | :not_member | :pending_leader_change | :cannot_remove_leader | :will_break_quorum
+  @type replace_leader_error_reason  :: not_leader | :uncommitted_membership_change | :not_member | :new_leader_unresponsive
 
   @doc """
   Removes a follower from a consensus group.
