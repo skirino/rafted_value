@@ -246,7 +246,7 @@ defmodule RaftedValue.Server do
     case Members.start_replacing_leader(members, new_leader) do
       {:error, _} = e    -> same_fsm_state_reply(state, e)
       {:ok, new_members} ->
-        if new_leader in Leadership.unresponsive_followers(leadership, config) do
+        if new_leader in Leadership.unresponsive_followers(leadership, members, config) do
           same_fsm_state_reply(state, {:error, :new_leader_unresponsive})
         else
           %State{state | members: new_members} |> same_fsm_state_reply(:ok)
@@ -501,7 +501,11 @@ defmodule RaftedValue.Server do
   end
 
   def handle_sync_event(_event, _from, state_name, %State{members: members, current_term: current_term, leadership: leadership, config: config} = state) do
-    unresponsive_followers = if state_name == :leader, do: Leadership.unresponsive_followers(leadership, config), else: []
+    unresponsive_followers =
+      case state_name do
+        :leader -> Leadership.unresponsive_followers(leadership, members, config)
+        _       -> []
+      end
     result = %{
       from:                   self,
       members:                PidSet.to_list(members.all),

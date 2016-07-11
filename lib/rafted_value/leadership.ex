@@ -59,13 +59,20 @@ defmodule RaftedValue.Leadership do
   end
 
   defun unresponsive_followers(%__MODULE__{follower_responded_times: times},
+                               members :: Members.t,
                                config :: Config.t) :: [pid] do
     since = monotonic_millis - max_election_timeout(config)
-    Enum.filter_map(times, fn {_, t} -> t < since end, fn {pid, _} -> pid end)
+    Members.other_members_list(members)
+    |> Enum.filter(fn pid ->
+      case times[pid] do
+        nil -> true
+        t   -> t < since
+      end
+    end)
   end
 
-  defun can_safely_remove?(%__MODULE__{} = l, %Members{all: all}, follower :: pid, config :: Config.t) :: boolean do
-    unhealthy_followers = unresponsive_followers(l, config)
+  defun can_safely_remove?(%__MODULE__{} = l, %Members{all: all} = members, follower :: pid, config :: Config.t) :: boolean do
+    unhealthy_followers = unresponsive_followers(l, members, config)
     if follower in unhealthy_followers do
       true # unhealthy follower can always be safely removed
     else
