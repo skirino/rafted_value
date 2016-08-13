@@ -100,6 +100,10 @@ defmodule RaftedValue do
   Executes a command on the stored value of `leader`.
 
   `id` is an identifier of the command and can be used to filter out duplicate requests.
+
+  If the leader does not respond in a timely manner, the function returns `{:error, :timeout}`, i.e., it internally catches exit.
+  Caller process should be prepared to handle delayed reply
+  (e.g. by dropping delayed reply by `handle_info(_msg, state)`).
   """
   defun command(leader      :: GenServer.server,
                 command_arg :: Data.command_arg,
@@ -112,6 +116,10 @@ defmodule RaftedValue do
 
   @doc """
   Executes a read-only query on the stored value of `leader`.
+
+  If the leader does not respond in a timely manner, the function returns `{:error, :timeout}`, i.e., it internally catches exit.
+  Caller process should be prepared to handle delayed reply
+  (e.g. by dropping delayed reply by `handle_info(_msg, state)`).
   """
   defun query(leader    :: GenServer.server,
               query_arg :: RaftedValue.Data.query_arg,
