@@ -45,7 +45,8 @@ defmodule RaftedValue do
 
   - `leader_hook_module`: An implementation of `RaftedValue.LeaderHook`. Defaults to `RaftedValue.LeaderHook.NoOp`.
   - `communication_module`: A module to define member-to-member async communication (`send_event/2` and `reply/2`).
-    This is configurable for internal testing purpose. Defaults to `:gen_fsm`.
+    Defaults to `RaftedValue.RemoteMessageGateway`.
+    This is configurable for internal testing purpose.
   - `heartbeat_timeout`: Raft's heartbeat timeout in milliseconds. Defaults to `200`.
   - `election_timeout`: Raft's leader election timeout in milliseconds.
     The acrual timeout value in each member is randomly chosen from `election_timeout .. 2 * election_timeout`.
@@ -64,7 +65,7 @@ defmodule RaftedValue do
     %Config{
       data_module:                         data_module,
       leader_hook_module:                  Keyword.get(opts, :leader_hook_module                 , RaftedValue.LeaderHook.NoOp),
-      communication_module:                Keyword.get(opts, :communication_module               , :gen_fsm),
+      communication_module:                Keyword.get(opts, :communication_module               , RaftedValue.RemoteMessageGateway),
       heartbeat_timeout:                   Keyword.get(opts, :heartbeat_timeout                  , 200),
       election_timeout:                    election_timeout,
       election_timeout_clock_drift_margin: Keyword.get(opts, :election_timeout_clock_drift_margin, election_timeout),
