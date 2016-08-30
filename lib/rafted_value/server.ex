@@ -19,13 +19,16 @@ defmodule RaftedValue.Server do
   #     - :election_timeout
   #     - :cannot_reach_quorum
   #     - :remove_follower_completed
-  # - sync (client-to-leader messages)
-  #   - {:command, arg, cmd_id}
-  #   - {:query, arg}
-  #   - {:change_config, new_config}
-  #   - {:add_follower, pid}
-  #   - {:remove_follower, pid}
-  #   - {:replace_leader, new_leader}
+  # - sync
+  #   - defined in Raft (client-to-leader messages)
+  #     - {:command, arg, cmd_id}
+  #     - {:query, arg}
+  #     - {:change_config, new_config}
+  #     - {:add_follower, pid}
+  #     - {:remove_follower, pid}
+  #     - {:replace_leader, new_leader}
+  #   - others (client-to-anymember messages)
+  #     - {:force_remove_member, pid}
   #
   # ## State transitions
   #
@@ -38,7 +41,7 @@ defmodule RaftedValue.Server do
   #   - in this case the incoming message that triggers the transition should be handled as a follower
   #   - implemented in `handle_append_entries_request`
   # - :candidate => :leader, when majority agrees
-  #   - implemented in `candidate(%RequestVoteResponse{}, state)`
+  #   - implemented in `candidate(%RequestVoteResponse{}, state)` (and in `become_candidate_and_start_new_election/2` for a special case)
   # - :leader => :follower, when stepping down to replace leader
   #   - implemented in `leader(%AppendEntriesResponse{}, state)`
   # - :leader => :follower, when election timeout elapses without getting responses from majority
@@ -352,11 +355,19 @@ defmodule RaftedValue.Server do
 
   defp become_candidate_and_start_new_election(%State{members: members, current_term: term, election: election, config: config} = state,
                                                replacing_leader? \\ false) do
-    new_members  = Members.put_leader(members, nil)
-    new_election = Election.update_for_candidate(election, config)
-    new_state = %State{state | members: new_members, current_term: term + 1, election: new_election}
-    broadcast_request_vote(new_state, replacing_leader?)
-    next_state(new_state, :candidate)
+    if PidSet.size(members.all) == 1 do
+      # 1-member consensus group must be handled separately.
+      # As `self` already has vote from majority (i.e. itself), no election is needed;
+      # skip candidate state and directly become a leader.
+      %State{state | current_term: term + 1, election: Election.new_for_leader}
+      |> become_leader
+    else
+      new_members  = Members.put_leader(members, nil)
+      new_election = Election.update_for_candidate(election, config)
+      new_state = %State{state | members: new_members, current_term: term + 1, election: new_election}
+      broadcast_request_vote(new_state, replacing_leader?)
+      next_state(new_state, :candidate)
+    end
   end
 
   defunp broadcast_request_vote(%State{members: members, current_term: term, logs: logs} = state,
@@ -509,6 +520,17 @@ defmodule RaftedValue.Server do
     next_state(state, state_name)
   end
 
+  def handle_sync_event({:force_remove_member, member_to_remove}, _from, state_name, %State{members: members} = state) do
+    if members.leader do
+      {:reply, {:error, :leader_exists}, state_name, state}
+    else
+      # There are cases where removing a member can trigger state transition (e.g. candidate => leader).
+      # To make things simpler, we defer those state transitions to next timer event (e.g. next election timeout).
+      new_members = Members.force_remove_member(members, member_to_remove)
+      new_state   = %State{state | members: new_members}
+      {:reply, :ok, state_name, new_state}
+    end
+  end
   def handle_sync_event(_event, _from, state_name, %State{members: members, current_term: current_term, leadership: leadership, config: config} = state) do
     unresponsive_followers =
       case state_name do

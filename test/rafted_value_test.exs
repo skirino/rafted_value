@@ -341,6 +341,37 @@ defmodule RaftedValueTest do
     assert get_term.(follower2) == leader_term
   end
 
+  test "force_remove_member should recover a failed consensus group" do
+    [3, 5, 7] |> Enum.each(fn n_members ->
+      {leader, followers} = make_cluster(n_members - 1)
+      remaining_members = Enum.take_random([leader | followers], div(n_members, 2))
+      failed_members    = [leader | followers] -- remaining_members
+
+      Enum.each(failed_members, &:gen_fsm.stop/1)
+      :timer.sleep(@t_max_election_timeout * 2)
+      refute Enum.any?(remaining_members, fn member ->
+        RaftedValue.status(member).state_name == :leader
+      end)
+
+      for m1 <- remaining_members, m2 <- failed_members do
+        assert RaftedValue.force_remove_member(m1, m2) == :ok
+      end
+      :timer.sleep(@t_max_election_timeout)
+      assert Enum.any?(remaining_members, fn member ->
+        RaftedValue.status(member).state_name == :leader
+      end)
+    end)
+  end
+
+  test "force_remove_member should return :leader_exists when using it against a healthy consensus group" do
+    {leader, followers} = make_cluster(2)
+    members1 = [leader | followers]
+    members2 = followers ++ [leader]
+    Enum.zip(members1, members2) |> Enum.each(fn {member1, member2} ->
+      assert RaftedValue.force_remove_member(member1, member2) == {:error, :leader_exists}
+    end)
+  end
+
   test "change_config should replace current config field on commit" do
     {leader, followers} = make_cluster(2)
     members = [leader | followers]

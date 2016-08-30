@@ -85,4 +85,18 @@ defmodule RaftedValue.Members do
       _                            -> m
     end
   end
+
+  defun force_remove_member(%__MODULE__{all: all, uncommitted_membership_change: mchange, pending_leader_change: lchange} = m, pid :: pid) :: t do
+    mchange2 =
+      case mchange do
+        {_term, _index, :add_follower   , ^pid} -> nil
+        {_term, _index, :remove_follower, ^pid} -> nil
+        _                                       -> mchange
+      end
+    %__MODULE__{m |
+      all:                           PidSet.delete(all, pid),
+      uncommitted_membership_change: mchange2,
+      pending_leader_change:         (if lchange == pid, do: nil, else: lchange),
+    }
+  end
 end

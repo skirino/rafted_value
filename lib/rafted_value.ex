@@ -90,9 +90,23 @@ defmodule RaftedValue do
   """
   defun replace_leader(current_leader :: GenServer.server, new_leader :: nil | pid) :: :ok | {:error, replace_leader_error_reason} do
     (current_leader, new_leader) when new_leader == nil or is_pid(new_leader) ->
-      catch_exit(fn ->
-        :gen_fsm.sync_send_event(current_leader, {:replace_leader, new_leader})
-      end)
+      :gen_fsm.sync_send_event(current_leader, {:replace_leader, new_leader})
+  end
+
+  @doc """
+  Tell a member to forget about another member.
+
+  The sole purpose of this function is to recover a consensus group from majority failure.
+  This operation is unsafe in the sense that it may not preserve invariants of the Raft algorithm
+  (for example some committed logs may be lost); use this function as a last resort.
+  When the receiver process thinks that there exists a valid leader, it rejects with `:leader_exists`.
+
+  Membership change introduced by this function is not propagated to other members.
+  It is caller's responsibility to notify all existing members of the membership change.
+  """
+  defun force_remove_member(member :: GenServer.server, member_to_remove :: pid) :: :ok | {:error, :leader_exists} do
+    (member, member_to_remove) when is_pid(member_to_remove) and member != member_to_remove ->
+      :gen_fsm.sync_send_all_state_event(member, {:force_remove_member, member_to_remove})
   end
 
   @type command_identifier :: reference | any
