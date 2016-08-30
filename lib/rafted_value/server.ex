@@ -22,6 +22,7 @@ defmodule RaftedValue.Server do
   # - sync (client-to-leader messages)
   #   - {:command, arg, cmd_id}
   #   - {:query, arg}
+  #   - {:change_config, new_config}
   #   - {:add_follower, pid}
   #   - {:remove_follower, pid}
   #   - {:replace_leader, new_leader}
@@ -46,9 +47,9 @@ defmodule RaftedValue.Server do
   # ## Misc notes
   #
   # - To make command execution "linearizable":
-  #   1. each command is assigned unique ID,
-  #   2. responses of command executions are cached
-  #   3. if cache found for a command, don't execute the command and just returns cached response
+  #   1. client assigns a unique ID to each command
+  #   2. servers cache responses of command executions
+  #   3. if cached response is found for a command, don't execute the command twice and just returns cached response
   #   (note that this is basically equivalent to implicitly establish client session for each request)
   #
 
@@ -209,6 +210,14 @@ defmodule RaftedValue.Server do
       same_fsm_state(state)
     end
   end
+  def leader({:change_config, new_config},
+             _from,
+             %State{current_term: term, logs: logs, config: config} = state) do
+    new_logs = Logs.add_entry(logs, config, fn index -> {term, index, :change_config, new_config} end)
+    %State{state | logs: new_logs}
+    |> same_fsm_state_reply(:ok)
+  end
+
   def leader({:add_follower, new_follower},
              from,
              %State{members: members, current_term: term, logs: logs, config: config} = state) do
@@ -337,7 +346,7 @@ defmodule RaftedValue.Server do
   end
 
   def candidate(_event, _from, %State{members: members} = state) do
-    # non-leader rejects synchronous events: `{:command, arg, cmd_id}`, `{:query, arg}`, `{:add_follower, pid}`, `{:remove_follower, pid}`, `{:replace_leader, new_leader}`
+    # non-leader rejects synchronous events: `{:command, arg, cmd_id}`, `{:query, arg}`, `{:change_config, new_config}`, `{:add_follower, pid}`, `{:remove_follower, pid}`, `{:replace_leader, new_leader}`
     same_fsm_state_reply(state, {:error, {:not_leader, members.leader}})
   end
 
@@ -407,7 +416,7 @@ defmodule RaftedValue.Server do
   end
 
   def follower(_event, _from, %State{members: members} = state) do
-    # non-leader rejects synchronous events: `{:command, arg, cmd_id}`, `{:query, arg}`, `{:add_follower, pid}`, `{:remove_follower, pid}`, `{:replace_leader, new_leader}`
+    # non-leader rejects synchronous events: `{:command, arg, cmd_id}`, `{:query, arg}`, `{:change_config, new_config}`, `{:add_follower, pid}`, `{:remove_follower, pid}`, `{:replace_leader, new_leader}`
     same_fsm_state_reply(state, {:error, {:not_leader, members.leader}})
   end
 
@@ -564,6 +573,8 @@ defmodule RaftedValue.Server do
       {_term, _index, :query, tuple} ->
         run_query(state, tuple)
         state
+      {_term, _index, :change_config, new_config} ->
+        %State{state | config: new_config}
       {_term, _index, :leader_elected, leader_pid} ->
         if leader_pid == self, do: hook.on_elected(data)
         state
@@ -581,6 +592,7 @@ defmodule RaftedValue.Server do
     case entry do
       {_term, _index, :command        , tuple        } -> run_command(state, tuple, false)
       {_term, _index, :query          , _tuple       } -> state
+      {_term, _index, :change_config  , new_config   } -> %State{state | config: new_config}
       {_term, _index, :leader_elected , _leader_pid  } -> state
       {_term, index , :add_follower   , _follower_pid} -> %State{state | members: Members.membership_change_committed(members, index)}
       {_term, index , :remove_follower, _follower_pid} -> %State{state | members: Members.membership_change_committed(members, index)}

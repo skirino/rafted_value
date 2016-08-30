@@ -3,9 +3,10 @@ alias Croma.TypeGen, as: TG
 alias Croma.Result, as: R
 
 defmodule RaftedValue.LogEntry do
-  alias RaftedValue.{TermNumber, LogIndex}
+  alias RaftedValue.{TermNumber, LogIndex, Config}
   @type t :: {TermNumber.t, LogIndex.t, :command        , {GenServer.from, Data.command_arg, reference}}
            | {TermNumber.t, LogIndex.t, :query          , {GenServer.from, Data.query_arg}}
+           | {TermNumber.t, LogIndex.t, :change_config  , Config.t}
            | {TermNumber.t, LogIndex.t, :leader_elected , pid}
            | {TermNumber.t, LogIndex.t, :add_follower   , pid}
            | {TermNumber.t, LogIndex.t, :remove_follower, pid}

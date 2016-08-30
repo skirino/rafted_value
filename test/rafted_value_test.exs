@@ -341,6 +341,21 @@ defmodule RaftedValueTest do
     assert get_term.(follower2) == leader_term
   end
 
+  test "change_config should replace current config field on commit" do
+    {leader, followers} = make_cluster(2)
+    members = [leader | followers]
+    Enum.each(members, fn member ->
+      assert RaftedValue.status(member).config == @conf
+    end)
+
+    new_conf = Map.update!(@conf, :election_timeout, fn t -> t + 1 end)
+    RaftedValue.change_config(leader, new_conf)
+    :timer.sleep(@conf.heartbeat_timeout * 2)
+    Enum.each(members, fn member ->
+      assert RaftedValue.status(member).config == new_conf
+    end)
+  end
+
   test "other callbacks just do irrelevant things" do
     {leader, followers} = make_cluster(2)
 

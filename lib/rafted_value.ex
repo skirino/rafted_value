@@ -139,6 +139,15 @@ defmodule RaftedValue do
     end
   end
 
+  @doc """
+  Replaces the current configuration.
+
+  The new configuration is replicated (as raft log) to all members.
+  """
+  defun change_config(leader :: GenServer.server, new_config = %Config{}) :: :ok | {:error, not_leader} do
+    :gen_fsm.sync_send_event(leader, {:change_config, new_config})
+  end
+
   @type status_result :: %{
     from:                   pid,
     members:                [pid],
