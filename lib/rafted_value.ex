@@ -123,7 +123,7 @@ defmodule RaftedValue do
   defun command(leader      :: GenServer.server,
                 command_arg :: Data.command_arg,
                 timeout     :: timeout \\ 5000,
-                id          :: command_identifier \\ make_ref) :: {:ok, Data.command_ret} | {:error, not_leader} do
+                id          :: command_identifier \\ make_ref) :: {:ok, Data.command_ret} | {:error, :noproc | :timeout | not_leader} do
     catch_exit(fn ->
       :gen_fsm.sync_send_event(leader, {:command, command_arg, id}, timeout)
     end)
@@ -138,7 +138,7 @@ defmodule RaftedValue do
   """
   defun query(leader    :: GenServer.server,
               query_arg :: RaftedValue.Data.query_arg,
-              timeout   :: timeout \\ 5000) :: {:ok, Data.query_ret} | {:error, not_leader} do
+              timeout   :: timeout \\ 5000) :: {:ok, Data.query_ret} | {:error, :noproc | :timeout | not_leader} do
     catch_exit(fn ->
       :gen_fsm.sync_send_event(leader, {:query, query_arg}, timeout)
     end)
