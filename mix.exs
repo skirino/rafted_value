@@ -28,8 +28,7 @@ defmodule RaftedValue.Mixfile do
       {:croma  , "~> 0.4"},
       {:coverex, "~> 1.4" , only: :test},
       {:dialyze, "~> 0.2" , only: :dev },
-      {:earmark, "~> 0.2" , only: :dev },
-      {:ex_doc , "~> 0.12", only: :dev },
+      {:ex_doc , "~> 0.14", only: :dev },
     ]
   end
 
