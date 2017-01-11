@@ -14,7 +14,7 @@ defmodule RaftedValue.Leadership do
     %__MODULE__{
       heartbeat_timer:          start_heartbeat_timer(config),
       quorum_timer:             start_quorum_timer(config),
-      quorum_timer_started_at:  monotonic_millis,
+      quorum_timer_started_at:  monotonic_millis(),
       follower_responded_times: %{},
     }
   end
@@ -23,7 +23,7 @@ defmodule RaftedValue.Leadership do
     :gen_fsm.cancel_timer(timer)
     %__MODULE__{l | heartbeat_timer: start_heartbeat_timer(config)}
   end
-  defun reset_quorum_timer(%__MODULE__{quorum_timer: timer} = l, config :: Config.t, now :: integer \\ monotonic_millis) :: t do
+  defun reset_quorum_timer(%__MODULE__{quorum_timer: timer} = l, config :: Config.t, now :: integer \\ monotonic_millis()) :: t do
     :gen_fsm.cancel_timer(timer)
     %__MODULE__{l | quorum_timer: start_quorum_timer(config), quorum_timer_started_at: now}
   end
@@ -39,10 +39,10 @@ defmodule RaftedValue.Leadership do
                            %Members{all: all},
                            follower :: pid,
                            config   :: Config.t) :: t do
-    now = monotonic_millis
+    now = monotonic_millis()
     new_times =
       Map.put(times, follower, now)
-      |> Map.take(PidSet.delete(all, self) |> PidSet.to_list) # filter by the actual members not to be disturbed by e.g. delayed message from removed member
+      |> Map.take(PidSet.delete(all, self()) |> PidSet.to_list) # filter by the actual members not to be disturbed by e.g. delayed message from removed member
     new_leadership = %__MODULE__{l | follower_responded_times: new_times}
     n_responded_since_timer_set = Enum.count(new_times, fn {_, time} -> started_at < time end)
     if (n_responded_since_timer_set + 1) * 2 > PidSet.size(all) do
@@ -61,7 +61,7 @@ defmodule RaftedValue.Leadership do
   defun unresponsive_followers(%__MODULE__{follower_responded_times: times},
                                members :: Members.t,
                                config :: Config.t) :: [pid] do
-    since = monotonic_millis - max_election_timeout(config)
+    since = monotonic_millis() - max_election_timeout(config)
     Members.other_members_list(members)
     |> Enum.filter(fn pid ->
       case times[pid] do
@@ -90,7 +90,7 @@ defmodule RaftedValue.Leadership do
   defun minimum_timeout_elapsed_since_quorum_responded?(%__MODULE__{quorum_timer_started_at: t},
                                                         %Config{election_timeout: timeout,
                                                                 election_timeout_clock_drift_margin: margin}) :: boolean do
-    t + timeout - margin <= monotonic_millis
+    t + timeout - margin <= monotonic_millis()
   end
 
   defunp monotonic_millis :: integer do

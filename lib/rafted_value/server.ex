@@ -135,7 +135,7 @@ defmodule RaftedValue.Server do
 
   defunp call_add_server_one(maybe_leader :: GenServer.server) :: Croma.Result.t(InstallSnapshot.t) do
     try do
-      :gen_fsm.sync_send_event(maybe_leader, {:add_follower, self})
+      :gen_fsm.sync_send_event(maybe_leader, {:add_follower, self()})
     catch
       :exit, {:noproc, _} -> {:error, :noproc}
     end
@@ -269,7 +269,7 @@ defmodule RaftedValue.Server do
   def become_leader(%State{members: members, current_term: term, logs: logs, config: config} = state) do
     leadership = Leadership.new_for_leader(config)
     new_logs = Logs.elected_leader(logs, members, term, config)
-    %State{state | members: Members.put_leader(members, self), leadership: leadership, logs: new_logs}
+    %State{state | members: Members.put_leader(members, self()), leadership: leadership, logs: new_logs}
     |> broadcast_append_entries
     |> next_state(:leader)
   end
@@ -374,7 +374,7 @@ defmodule RaftedValue.Server do
                                 replacing_leader? :: boolean) :: :ok do
     Members.other_members_list(members) |> Enum.each(fn member ->
       {last_log_term, last_log_index, _, _} = Logs.last_entry(logs)
-      req = %RequestVoteRequest{term: term, candidate_pid: self, last_log: {last_log_term, last_log_index}, replacing_leader: replacing_leader?}
+      req = %RequestVoteRequest{term: term, candidate_pid: self(), last_log: {last_log_term, last_log_index}, replacing_leader: replacing_leader?}
       send_event(state, member, req)
     end)
   end
@@ -460,7 +460,7 @@ defmodule RaftedValue.Server do
                                      %State{members: members, current_term: current_term, logs: logs, config: config} = state,
                                      current_state_name) do
     reply_as_failure = fn larger_term ->
-      send_event(state, leader_pid, %AppendEntriesResponse{from: self, term: larger_term, success: false})
+      send_event(state, leader_pid, %AppendEntriesResponse{from: self(), term: larger_term, success: false})
     end
 
     if term < current_term do
@@ -473,7 +473,7 @@ defmodule RaftedValue.Server do
         new_members2 = Members.put_leader(new_members1, leader_pid)
         new_state1 = %State{state | members: new_members2, current_term: term, logs: new_logs}
         new_state2 = Enum.reduce(applicable_entries, new_state1, &nonleader_apply_committed_log_entry/2)
-        reply = %AppendEntriesResponse{from: self, term: term, success: true, i_replicated: new_logs.i_max}
+        reply = %AppendEntriesResponse{from: self(), term: term, success: true, i_replicated: new_logs.i_max}
         send_event(new_state2, leader_pid, reply)
         new_state2
       else
@@ -496,7 +496,7 @@ defmodule RaftedValue.Server do
           term == current_term                   and # the case `term > current_term` is covered by `become_follower_if_new_term_started`
           election.voted_for in [nil, candidate] and
           Logs.candidate_log_up_to_date?(logs, last_log))
-        response = %RequestVoteResponse{from: self, term: current_term, vote_granted: grant_vote?}
+        response = %RequestVoteResponse{from: self(), term: current_term, vote_granted: grant_vote?}
         send_event(state, candidate, response)
         if grant_vote? do
           %State{state | election: Election.vote_for(election, candidate, config)}
@@ -507,7 +507,7 @@ defmodule RaftedValue.Server do
       end)
     else
       # Reject vote request if leader lease has not yet expired
-      response = %RequestVoteResponse{from: self, term: current_term, vote_granted: false}
+      response = %RequestVoteResponse{from: self(), term: current_term, vote_granted: false}
       send_event(state, candidate, response)
       next_state(state, current_state_name)
     end
@@ -538,7 +538,7 @@ defmodule RaftedValue.Server do
         _       -> []
       end
     result = %{
-      from:                   self,
+      from:                   self(),
       members:                PidSet.to_list(members.all),
       leader:                 members.leader,
       unresponsive_followers: unresponsive_followers,
@@ -598,7 +598,7 @@ defmodule RaftedValue.Server do
       {_term, _index, :change_config, new_config} ->
         %State{state | config: new_config}
       {_term, _index, :leader_elected, leader_pid} ->
-        if leader_pid == self, do: hook.on_elected(data)
+        if leader_pid == self(), do: hook.on_elected(data)
         state
       {_term, index , :add_follower, follower_pid} ->
         hook.on_follower_added(data, follower_pid)

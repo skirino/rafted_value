@@ -38,7 +38,7 @@ defmodule RaftedValue.Logs do
   # for leader
   #
   defun new_for_lonely_leader :: t do
-    first_entry = {0, 1, :leader_elected, self}
+    first_entry = {0, 1, :leader_elected, self()}
     %__MODULE__{map: %{1 => first_entry}, i_min: 1, i_max: 1, i_committed: 1, followers: %{}}
   end
 
@@ -67,7 +67,7 @@ defmodule RaftedValue.Logs do
             end
           %AppendEntriesRequest{
             term:            term,
-            leader_pid:      self,
+            leader_pid:      self(),
             prev_log:        {term_prev, i_prev},
             entries:         slice_entries(m, i_next, i_max),
             i_leader_commit: i_c,
@@ -84,7 +84,7 @@ defmodule RaftedValue.Logs do
                            config       :: Config.t) :: {t, [LogEntry.t]} do
     new_followers =
       Map.put(followers, follower_pid, {i_replicated + 1, i_replicated})
-      |> Map.take(PidSet.delete(members_set, self) |> PidSet.to_list) # in passing we remove outdated entries in `new_followers`
+      |> Map.take(PidSet.delete(members_set, self()) |> PidSet.to_list) # in passing we remove outdated entries in `new_followers`
     new_logs      = %__MODULE__{logs | followers: new_followers} |> update_commit_index(current_term, members_set, config)
     applicable_entries = slice_entries(map, old_i_committed + 1, new_logs.i_committed)
     {new_logs, applicable_entries}
@@ -118,7 +118,7 @@ defmodule RaftedValue.Logs do
                      current_term        :: TermNumber.t,
                      followers           :: FollowerIndices.t) :: boolean do
     if term == current_term do
-      follower_pids = members_set |> PidSet.delete(self) |> PidSet.to_list
+      follower_pids = members_set |> PidSet.delete(self()) |> PidSet.to_list
       n_necessary_followers = div(length(follower_pids) + 1, 2)
       n_uptodate_followers = Enum.count(follower_pids, fn f ->
         case followers[f] do
@@ -156,7 +156,7 @@ defmodule RaftedValue.Logs do
       Members.other_members_list(members)
       |> Enum.into(%{}, fn follower -> {follower, follower_index_pair} end)
     %__MODULE__{logs | followers: followers}
-    |> add_entry(config, fn i -> {term, i, :leader_elected, self} end)
+    |> add_entry(config, fn i -> {term, i, :leader_elected, self()} end)
   end
 
   defun prepare_to_add_follower(%__MODULE__{i_max: i_max, followers: followers} = logs,

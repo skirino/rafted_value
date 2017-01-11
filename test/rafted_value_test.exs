@@ -69,8 +69,8 @@ defmodule RaftedValueTest do
   end
 
   def simulate_send_sync_event(dest, event) do
-    ref = make_ref
-    send(dest, {:"$gen_sync_event", {self, ref}, event})
+    ref = make_ref()
+    send(dest, {:"$gen_sync_event", {self(), ref}, event})
     ref
   end
 
@@ -105,15 +105,15 @@ defmodule RaftedValueTest do
     {:ok, leader} = RaftedValue.start_link({:create_new_consensus_group, @conf})
     _follower1 = add_follower(leader)
 
-    ref1 = simulate_send_sync_event(leader, {:add_follower, self})
-    ref2 = simulate_send_sync_event(leader, {:add_follower, self})
+    ref1 = simulate_send_sync_event(leader, {:add_follower, self()})
+    ref2 = simulate_send_sync_event(leader, {:add_follower, self()})
     assert_receive({^ref1, {:ok, %RaftedValue.RPC.InstallSnapshot{}}})
     assert_receive({^ref2, {:error, :uncommitted_membership_change}})
 
     wait_until_member_change_completes(leader)
 
-    ref1 = simulate_send_sync_event(leader, {:remove_follower, self})
-    ref2 = simulate_send_sync_event(leader, {:remove_follower, self})
+    ref1 = simulate_send_sync_event(leader, {:remove_follower, self()})
+    ref2 = simulate_send_sync_event(leader, {:remove_follower, self()})
     assert_receive({^ref1, :ok})
     assert_receive({^ref2, {:error, :uncommitted_membership_change}})
 
@@ -133,7 +133,7 @@ defmodule RaftedValueTest do
 
   test "should report error when trying to remove non member" do
     {:ok, leader} = RaftedValue.start_link({:create_new_consensus_group, @conf})
-    assert RaftedValue.remove_follower(leader, self) == {:error, :not_member}
+    assert RaftedValue.remove_follower(leader, self()) == {:error, :not_member}
   end
 
   test "start_link_and_join_consensus_group should return error and the process should die when no leader found" do
@@ -252,7 +252,7 @@ defmodule RaftedValueTest do
     assert RaftedValue.command(leader, {:set, 2}) == {:ok, 1}
     assert RaftedValue.command(leader, :get     ) == {:ok, 2}
 
-    ref = make_ref
+    ref = make_ref()
     assert RaftedValue.command(leader, :inc, 5000, ref) == {:ok, 2}
     assert RaftedValue.command(leader, :inc, 5000, ref) == {:ok, 2}
     assert RaftedValue.command(leader, :inc, 5000, ref) == {:ok, 2}
@@ -413,7 +413,7 @@ defmodule RaftedValueTest do
       5 ->
         {cmd, ref, tries} =
           case pending_cmd_tuple do
-            nil                  -> {pick_data_manipulation, make_ref, 20}
+            nil                  -> {pick_data_manipulation(), make_ref(), 20}
             {_cmd, _ref, 0}      -> raise "No leader found, something is wrong!"
             {_cmd, _ref, _tries} -> pending_cmd_tuple
           end
@@ -570,7 +570,7 @@ defmodule RaftedValueTest do
     followers_in_majority = List.delete(working, leader)
     next_leader = Enum.random(followers_in_majority)
     assert RaftedValue.replace_leader(leader, next_leader) == :ok
-    new_leader = receive_leader_elected_message || raise "leader should be elected"
+    new_leader = receive_leader_elected_message() || raise "leader should be elected"
     %{context | current_leader: new_leader}
   end
 
@@ -613,7 +613,7 @@ defmodule RaftedValueTest do
       assert_receive({:EXIT, ^target, :normal})
       new_context = %{context | working: List.delete(working, target), killed: [target | killed], isolated: List.delete(isolated, target)}
       if target == leader do
-        %{new_context | current_leader: receive_leader_elected_message}
+        %{new_context | current_leader: receive_leader_elected_message()}
       else
         new_context
       end
@@ -635,7 +635,7 @@ defmodule RaftedValueTest do
     def on_query_answered(_, _, _)      , do: nil
     def on_follower_added(_, pid)       , do: send(:test_runner, {:follower_added, pid})
     def on_follower_removed(_, pid)     , do: send(:test_runner, {:follower_removed, pid})
-    def on_elected(_)                   , do: send(:test_runner, {:elected, self})
+    def on_elected(_)                   , do: send(:test_runner, {:elected, self()})
   end
 
   defp receive_leader_elected_message do
@@ -647,7 +647,7 @@ defmodule RaftedValueTest do
   end
 
   defp start_cluster_and_client(config) do
-    Process.register(self, :test_runner)
+    Process.register(self(), :test_runner)
     {leader, [follower1, follower2]} = make_cluster(2, config)
     assert_received({:follower_added, ^follower1})
     assert_received({:follower_added, ^follower2})
@@ -707,7 +707,7 @@ defmodule RaftedValueTest do
 
     defp reachable?(to) do
       isolated = Agent.get(__MODULE__, fn l -> l end)
-      !(self in isolated) and !(to in isolated)
+      !(self() in isolated) and !(to in isolated)
     end
 
     def send_event(server, event) do
@@ -748,7 +748,7 @@ defmodule RaftedValueTest do
         CommunicationWithNetsplit.set(isolated)
         leader_after_netsplit =
           if c1.current_leader in isolated do
-            receive_leader_elected_message || receive_leader_elected_message || raise "no leader!!!"
+            receive_leader_elected_message() || receive_leader_elected_message() || raise "no leader!!!"
           else
             c1.current_leader
           end
@@ -760,7 +760,7 @@ defmodule RaftedValueTest do
         working_after_heal = c3.working ++ c3.isolated
         send(client_pid, {:members, working_after_heal})
         CommunicationWithNetsplit.set([])
-        leader_after_heal = receive_leader_elected_message || c3.current_leader
+        leader_after_heal = receive_leader_elected_message() || c3.current_leader
         c4 = %{c3 | working: working_after_heal, isolated: [], current_leader: leader_after_heal}
         Enum.reduce(c4.killed, c4, fn(_, c) -> op_purge_killed_member(c) end)
       end)

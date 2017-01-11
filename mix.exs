@@ -6,13 +6,13 @@ defmodule RaftedValue.Mixfile do
   def project do
     [
       app:             :rafted_value,
-      version:         "0.1.7",
+      version:         "0.1.8",
       elixir:          "~> 1.2",
       build_embedded:  Mix.env == :prod,
       start_permanent: Mix.env == :prod,
-      deps:            deps,
+      deps:            deps(),
       description:     "Replicated and synchronized values wrapped by processes",
-      package:         package,
+      package:         package(),
       source_url:      @github_url,
       homepage_url:    @github_url,
       test_coverage:   [tool: Coverex.Task, coveralls: true],
