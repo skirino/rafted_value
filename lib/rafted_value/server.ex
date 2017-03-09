@@ -490,7 +490,7 @@ defmodule RaftedValue.Server do
   defp handle_request_vote_request(%RequestVoteRequest{term: term, candidate_pid: candidate, last_log: last_log, replacing_leader: replacing?} = rpc,
                                    %State{current_term: current_term, election: election, logs: logs, config: config} = state,
                                    current_state_name) do
-    if replacing? or leader_authority_valid?(current_state_name, state) do
+    if replacing? or leader_authority_timed_out?(current_state_name, state) do
       become_follower_if_new_term_started(rpc, state, fn ->
         grant_vote? = (
           term == current_term                   and # the case `term > current_term` is covered by `become_follower_if_new_term_started`
@@ -580,7 +580,7 @@ defmodule RaftedValue.Server do
     %State{state | election: Election.reset_timer(election, config)}
   end
 
-  defunp leader_authority_valid?(current_state_name, state) :: boolean do
+  defunp leader_authority_timed_out?(current_state_name :: atom, state :: State.t) :: boolean do
     (:leader, %State{leadership: leadership, config: config}) ->
       Leadership.minimum_timeout_elapsed_since_quorum_responded?(leadership, config)
     (_, %State{election: election, config: config}) ->
