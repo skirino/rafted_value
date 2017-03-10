@@ -56,7 +56,7 @@ defmodule RaftedValue.Server do
   #   (note that this is basically equivalent to implicitly establish client session for each request)
   #
 
-  alias RaftedValue.{TermNumber, PidSet, Members, Leadership, Election, Logs, CommandResults, Config}
+  alias RaftedValue.{TermNumber, PidSet, Members, Leadership, Election, Logs, CommandResults, Config, Monotonic}
   alias RaftedValue.RPC.{
     AppendEntriesRequest,
     AppendEntriesResponse,
@@ -156,7 +156,7 @@ defmodule RaftedValue.Server do
         case members do
           %Members{pending_leader_change: ^from} ->
             # now we know that the follower `from` is alive => make it a new leader
-            case Logs.make_append_entries_req(new_logs, current_term, from, :erlang.monotonic_time(:milli_seconds)) do
+            case Logs.make_append_entries_req(new_logs, current_term, from, Monotonic.millis()) do
               {:ok, append_req} ->
                 req = %TimeoutNow{append_entries_req: append_req}
                 send_event(new_state2, from, req)
@@ -171,7 +171,7 @@ defmodule RaftedValue.Server do
         # prev log from leader didn't match follower's => decrement "next index" for the follower and try to resend AppendEntries
         new_logs = Logs.decrement_next_index_of_follower(logs, from)
         %State{state | leadership: new_leadership, logs: new_logs}
-        |> send_append_entries(from, :erlang.monotonic_time(:milli_seconds))
+        |> send_append_entries(from, Monotonic.millis())
         |> same_fsm_state
       end
     end)
@@ -285,7 +285,7 @@ defmodule RaftedValue.Server do
       new_state = %State{state | leadership: new_leadership, logs: new_logs}
       Enum.reduce(applicable_entries, new_state, &leader_apply_committed_log_entry/2)
     else
-      now = :erlang.monotonic_time(:milli_seconds)
+      now = Monotonic.millis()
       Enum.reduce(followers, state, fn(follower, s) ->
         send_append_entries(s, follower, now)
       end)
@@ -293,7 +293,7 @@ defmodule RaftedValue.Server do
     |> reset_heartbeat_timer
   end
 
-  defunp send_append_entries(%State{current_term: term, logs: logs} = state, follower :: pid, now :: integer) :: State.t do
+  defunp send_append_entries(%State{current_term: term, logs: logs} = state, follower :: pid, now :: Monotonic.t) :: State.t do
     case Logs.make_append_entries_req(logs, term, follower, now) do
       {:ok, req} ->
         send_event(state, follower, req)

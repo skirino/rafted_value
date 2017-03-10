@@ -2,13 +2,13 @@ use Croma
 alias Croma.TypeGen, as: TG
 
 defmodule RaftedValue.Election do
-  alias RaftedValue.{PidSet, Members, Config}
+  alias RaftedValue.{PidSet, Members, Config, Monotonic}
 
   use Croma.Struct, fields: [
     voted_for:         TG.nilable(Croma.Pid),
     votes:             TG.nilable(PidSet),
     timer:             TG.nilable(Croma.Reference),
-    leader_message_at: TG.nilable(Croma.Integer),
+    leader_message_at: TG.nilable(Monotonic),
   ]
 
   defun new_for_leader :: t do
@@ -16,7 +16,7 @@ defmodule RaftedValue.Election do
   end
 
   defun new_for_follower(config :: Config.t) :: t do
-    %__MODULE__{timer: start_timer(config), leader_message_at: monotonic_millis()}
+    %__MODULE__{timer: start_timer(config), leader_message_at: Monotonic.millis()}
   end
 
   defun update_for_candidate(%__MODULE__{timer: timer} = e, config :: Config.t) :: t do
@@ -48,7 +48,7 @@ defmodule RaftedValue.Election do
 
   defun reset_timer(%__MODULE__{timer: timer} = e, config :: Config.t) :: t do
     if timer, do: :gen_fsm.cancel_timer(timer)
-    %__MODULE__{e | timer: start_timer(config), leader_message_at: monotonic_millis()}
+    %__MODULE__{e | timer: start_timer(config), leader_message_at: Monotonic.millis()}
   end
 
   defunp start_timer(%Config{election_timeout: timeout}) :: reference do
@@ -61,11 +61,7 @@ defmodule RaftedValue.Election do
                                                                    election_timeout_clock_drift_margin: margin}) :: boolean do
     case t do
       nil -> true
-      t   -> t + timeout - margin <= monotonic_millis()
+      t   -> t + timeout - margin <= Monotonic.millis()
     end
-  end
-
-  defunp monotonic_millis :: integer do
-    :erlang.monotonic_time(:milli_seconds)
   end
 end

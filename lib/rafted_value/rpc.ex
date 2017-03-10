@@ -2,7 +2,7 @@ use Croma
 alias Croma.TypeGen, as: TG
 
 defmodule RaftedValue.RPC do
-  alias RaftedValue.{Config, TermNumber, LogIndex, LogInfo, LogEntry, Members, CommandResults}
+  alias RaftedValue.{Config, TermNumber, LogIndex, LogInfo, LogEntry, Members, CommandResults, Monotonic}
 
   defmodule AppendEntriesRequest do
     use Croma.Struct, fields: [
@@ -11,7 +11,7 @@ defmodule RaftedValue.RPC do
       prev_log:         LogInfo,
       entries:          TG.list_of(LogEntry),
       i_leader_commit:  LogIndex,
-      leader_timestamp: TG.nilable(Croma.Integer),
+      leader_timestamp: Monotonic,
     ]
   end
 
@@ -21,7 +21,7 @@ defmodule RaftedValue.RPC do
       term:             TermNumber,
       success:          Croma.Boolean,
       i_replicated:     TG.nilable(LogIndex),
-      leader_timestamp: TG.nilable(Croma.Integer),
+      leader_timestamp: Monotonic,
     ]
   end
 

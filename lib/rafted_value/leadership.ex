@@ -1,20 +1,20 @@
 use Croma
 
 defmodule RaftedValue.Leadership do
-  alias RaftedValue.{PidSet, Members, Config}
+  alias RaftedValue.{PidSet, Members, Config, Monotonic}
 
   use Croma.Struct, fields: [
     heartbeat_timer:          Croma.Reference,
     quorum_timer:             Croma.Reference,
-    quorum_timer_started_at:  Croma.Integer,
-    follower_responded_times: Croma.Map, # %{pid => monotonic_millis_integer} : latest `:leader_timestamp`s each follower responded to
+    quorum_timer_started_at:  Monotonic,
+    follower_responded_times: Croma.Map, # %{pid => Monotonic.t} : latest `:leader_timestamp`s each follower responded to
   ]
 
   defun new_for_leader(config :: Config.t) :: t do
     %__MODULE__{
       heartbeat_timer:          start_heartbeat_timer(config),
       quorum_timer:             start_quorum_timer(config),
-      quorum_timer_started_at:  monotonic_millis(),
+      quorum_timer_started_at:  Monotonic.millis(),
       follower_responded_times: %{},
     }
   end
@@ -25,7 +25,7 @@ defmodule RaftedValue.Leadership do
   end
   defun reset_quorum_timer(%__MODULE__{quorum_timer: timer} = l, config :: Config.t) :: t do
     :gen_fsm.cancel_timer(timer)
-    %__MODULE__{l | quorum_timer: start_quorum_timer(config), quorum_timer_started_at: monotonic_millis()}
+    %__MODULE__{l | quorum_timer: start_quorum_timer(config), quorum_timer_started_at: Monotonic.millis()}
   end
 
   defunp start_heartbeat_timer(%Config{heartbeat_timeout: timeout}) :: reference do
@@ -43,10 +43,10 @@ defmodule RaftedValue.Leadership do
   defun follower_responded(%__MODULE__{quorum_timer_started_at: started_at, follower_responded_times: times} = l,
                            %Members{all: all} = members,
                            follower  :: pid,
-                           timestamp :: nil | integer, # `nil` only when either leader or follower is running rafted_value <= 0.1.8
+                           timestamp :: Monotonic.t,
                            config    :: Config.t) :: t do
     # if `nil` fallback to the older behaviour; it's actually incorrect but works fine except for extremely rare occasions
-    t = timestamp || monotonic_millis()
+    t = timestamp || Monotonic.millis()
     follower_pids = PidSet.delete(all, self()) |> PidSet.to_list
     new_times =
       Map.update(times, follower, t, &max(&1, t))
@@ -72,7 +72,7 @@ defmodule RaftedValue.Leadership do
   defun unresponsive_followers(%__MODULE__{follower_responded_times: times},
                                members :: Members.t,
                                config :: Config.t) :: [pid] do
-    since = monotonic_millis() - max_election_timeout(config)
+    since = Monotonic.millis() - max_election_timeout(config)
     Members.other_members_list(members)
     |> Enum.filter(fn pid ->
       case times[pid] do
@@ -104,7 +104,7 @@ defmodule RaftedValue.Leadership do
                                election_timeout_clock_drift_margin: margin}) :: boolean do
     case quorum_last_reached_at(leadership, members) do
       nil        -> true
-      reached_at -> reached_at + timeout - margin <= monotonic_millis()
+      reached_at -> reached_at + timeout - margin <= Monotonic.millis()
     end
   end
 
@@ -115,10 +115,6 @@ defmodule RaftedValue.Leadership do
         n_half_followers = div(n - 1, 2)
         Map.values(times) |> Enum.sort |> Enum.drop(n_half_followers) |> List.first
     end
-  end
-
-  defunp monotonic_millis :: integer do
-    :erlang.monotonic_time(:milli_seconds)
   end
 
   defunp max_election_timeout(%Config{election_timeout: t}) :: pos_integer do

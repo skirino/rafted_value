@@ -31,3 +31,15 @@ defmodule RaftedValue.FollowerIndices do
   end
   use Croma.SubtypeOfMap, key_module: Croma.Pid, value_module: Pair
 end
+
+defmodule RaftedValue.Monotonic do
+  @type t :: integer
+  defun validate(v :: term) :: Croma.Result.t(t) do
+    i when is_integer(i) -> {:ok, i}
+    _                    -> {:error, {:invalid_value, [__MODULE__]}}
+  end
+
+  defun millis :: t do
+    System.monotonic_time(:milliseconds)
+  end
+end
