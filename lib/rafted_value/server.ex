@@ -186,13 +186,13 @@ defmodule RaftedValue.Server do
   def leader(%RequestVoteRequest{} = rpc, state) do
     handle_request_vote_request(rpc, state, :leader)
   end
-  def leader(%{__struct__: s} = rpc, state) when s == AppendEntriesRequest or s == RequestVoteResponse do
+  def leader(%s{} = rpc, state) when s in [AppendEntriesRequest, RequestVoteResponse] do
     become_follower_if_new_term_started(rpc, state, fn ->
-      same_fsm_state(state) # neglect `AppendEntriesRequest`, `RequestVoteResponse`, `TimeoutNow` for this term / older term
+      same_fsm_state(state) # neglect `AppendEntriesRequest`, `RequestVoteResponse` for this term / older term
     end)
   end
   def leader(_event, state) do
-    same_fsm_state(state) # leader neglects `:election_timeout`, `:remove_follower_completed`, `InstallSnapshot`
+    same_fsm_state(state) # leader neglects `:election_timeout`, `:remove_follower_completed`, `InstallSnapshot`, `TimeoutNow`
   end
 
   def leader({:command, arg, cmd_id}, from, %State{current_term: term, logs: logs, config: config} = state) do
@@ -390,7 +390,7 @@ defmodule RaftedValue.Server do
   def follower(%RequestVoteRequest{} = rpc, state) do
     handle_request_vote_request(rpc, state, :follower)
   end
-  def follower(%{__struct__: s} = rpc, state) when s == AppendEntriesResponse or s == RequestVoteResponse do
+  def follower(%s{} = rpc, state) when s in [AppendEntriesResponse, RequestVoteResponse] do
     become_follower_if_new_term_started(rpc, state, fn ->
       same_fsm_state(state) # neglect `AppendEntriesResponse`, `RequestVoteResponse` from this term / older term
     end)
