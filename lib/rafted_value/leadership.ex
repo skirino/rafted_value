@@ -109,11 +109,15 @@ defmodule RaftedValue.Leadership do
   end
 
   defunp quorum_last_reached_at(%__MODULE__{follower_responded_times: times}, %Members{all: all}) :: nil | integer do
-    case PidSet.size(all) do
-      0 -> nil
-      n ->
-        n_half_followers = div(n - 1, 2)
-        Map.values(times) |> Enum.sort |> Enum.drop(n_half_followers) |> List.first
+    n = PidSet.size(all)
+    if n <= 1 do
+      nil
+    else
+      n_half_followers = div(n - 1, 2)
+      Map.values(times)
+      |> Enum.sort
+      |> Enum.drop(n_half_followers)
+      |> List.first # can return `nil` if `follwer_responded_times` doesn't contain enough items (i.e. right after a leader is elected)
     end
   end
 
