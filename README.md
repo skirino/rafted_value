@@ -16,6 +16,12 @@
     - replacing leader
 - Each consensus group member is implemented as a [`:gen_fsm`](http://erlang.org/doc/man/gen_fsm.html) process.
 
+## Notes on backward compatibility
+
+- Users of `<= 0.1.8` should upgrade to `0.1.10` before upgrading to `>= 0.2.0`
+    - RPC protocol of `<= 0.1.8` and that of `>= 0.2.0` are not compatible
+    - Version `0.1.10` should be able to interact with both `<= 0.1.8` and `>= 0.2.0`
+
 ## Example
 
 Suppose there are 3 erlang nodes running:

@@ -144,11 +144,10 @@ defmodule RaftedValue.Server do
   #
   # leader state
   #
-  def leader(%AppendEntriesResponse{from: from, success: success, i_replicated: i_replicated} = rpc,
+  def leader(%AppendEntriesResponse{from: from, success: success, i_replicated: i_replicated, leader_timestamp: leader_timestamp} = rpc,
              %State{members: members, current_term: current_term, leadership: leadership, logs: logs, config: config} = state) do
     become_follower_if_new_term_started(rpc, state, fn ->
-      # We don't assume existence of `:leader_timestamp` field in rpc message
-      new_leadership = Leadership.follower_responded(leadership, members, from, Map.get(rpc, :leader_timestamp), config)
+      new_leadership = Leadership.follower_responded(leadership, members, from, leader_timestamp, config)
       if success do
         {new_logs, applicable_entries} = Logs.set_follower_index(logs, members, current_term, from, i_replicated, config)
         new_state1 = %State{state | leadership: new_leadership, logs: new_logs}
@@ -458,11 +457,11 @@ defmodule RaftedValue.Server do
   # common handler implementations
   #
   defp handle_append_entries_request(%AppendEntriesRequest{term: term, leader_pid: leader_pid, prev_log: prev_log,
-                                                           entries: entries, i_leader_commit: i_leader_commit} = append_req,
+                                                           entries: entries, i_leader_commit: i_leader_commit, leader_timestamp: leader_timestamp},
                                      %State{members: members, current_term: current_term, logs: logs, config: config} = state,
                                      current_state_name) do
     reply_as_failure = fn larger_term ->
-      send_event(state, leader_pid, %AppendEntriesResponse{from: self(), term: larger_term, success: false} |> put_leader_timestamp(append_req))
+      send_event(state, leader_pid, %AppendEntriesResponse{from: self(), term: larger_term, success: false, leader_timestamp: leader_timestamp})
     end
 
     if term < current_term do
@@ -475,7 +474,7 @@ defmodule RaftedValue.Server do
         new_members2 = Members.put_leader(new_members1, leader_pid)
         new_state1 = %State{state | members: new_members2, current_term: term, logs: new_logs}
         new_state2 = Enum.reduce(applicable_entries, new_state1, &nonleader_apply_committed_log_entry/2)
-        reply = %AppendEntriesResponse{from: self(), term: term, success: true, i_replicated: new_logs.i_max} |> put_leader_timestamp(append_req)
+        reply = %AppendEntriesResponse{from: self(), term: term, success: true, i_replicated: new_logs.i_max, leader_timestamp: leader_timestamp}
         send_event(new_state2, leader_pid, reply)
         new_state2
       else
@@ -486,15 +485,6 @@ defmodule RaftedValue.Server do
       end
       |> reset_election_timer_on_leader_message
       |> next_state(:follower)
-    end
-  end
-
-  defp put_leader_timestamp(append_resp, append_req) do
-    # We don't assume existence of `:leader_timestamp` field for backward compatibility:
-    # leader running rafted_value <= 0.1.8 don't include `:leader_timestamp` field in AppendEntriesRequest.
-    case Map.get(append_req, :leader_timestamp) do
-      nil -> append_resp
-      t   -> %AppendEntriesResponse{append_resp | leader_timestamp: t}
     end
   end
 

@@ -35,21 +35,14 @@ defmodule RaftedValue.Leadership do
     :gen_fsm.send_event_after(max_election_timeout(config), :cannot_reach_quorum)
   end
 
-  # `follower_responded/4` is just for backward compatibility (older servers may call this), will be removed afterward
-  def follower_responded(leadership, members, follower, config) do
-    follower_responded(leadership, members, follower, nil, config)
-  end
-
   defun follower_responded(%__MODULE__{quorum_timer_started_at: started_at, follower_responded_times: times} = l,
                            %Members{all: all} = members,
                            follower  :: pid,
                            timestamp :: Monotonic.t,
                            config    :: Config.t) :: t do
-    # if `nil` fallback to the older behaviour; it's actually incorrect but works fine except for extremely rare occasions
-    t = timestamp || Monotonic.millis()
     follower_pids = PidSet.delete(all, self()) |> PidSet.to_list
     new_times =
-      Map.update(times, follower, t, &max(&1, t))
+      Map.update(times, follower, timestamp, &max(&1, timestamp))
       |> Map.take(follower_pids) # filter by the actual members, in order not to be disturbed by message from already-removed member
     new_leadership = %__MODULE__{l | follower_responded_times: new_times}
     case quorum_last_reached_at(new_leadership, members) do
