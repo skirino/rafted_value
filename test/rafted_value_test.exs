@@ -405,7 +405,8 @@ defmodule RaftedValueTest do
   defmodule CommunicationWithDelay do
     def send_event(server, event) do
       case event do
-        %s{} when s in [RaftedValue.RPC.AppendEntriesRequest, RaftedValue.RPC.AppendEntriesResponse] ->
+        # workaround for elixir 1.2; can be rewritten as `%s{}` in elixir >= 1.3.0
+        %{__struct__: s} when s in [RaftedValue.RPC.AppendEntriesRequest, RaftedValue.RPC.AppendEntriesResponse] ->
           spawn(fn ->
             :timer.sleep(40)
             :gen_fsm.send_event(server, event)

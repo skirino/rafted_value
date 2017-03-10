@@ -6,7 +6,7 @@ defmodule RaftedValue.Mixfile do
   def project do
     [
       app:             :rafted_value,
-      version:         "0.1.8",
+      version:         "0.1.9",
       elixir:          "~> 1.2",
       build_embedded:  Mix.env == :prod,
       start_permanent: Mix.env == :prod,

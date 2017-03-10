@@ -7,7 +7,7 @@ defmodule RaftedValue.Leadership do
     heartbeat_timer:          Croma.Reference,
     quorum_timer:             Croma.Reference,
     quorum_timer_started_at:  Croma.Integer,
-    follower_responded_times: Croma.Map, # %{pid => integer}
+    follower_responded_times: Croma.Map, # %{pid => monotonic_millis_integer} : latest `:leader_timestamp`s each follower responded to
   ]
 
   defun new_for_leader(config :: Config.t) :: t do
@@ -23,9 +23,9 @@ defmodule RaftedValue.Leadership do
     :gen_fsm.cancel_timer(timer)
     %__MODULE__{l | heartbeat_timer: start_heartbeat_timer(config)}
   end
-  defun reset_quorum_timer(%__MODULE__{quorum_timer: timer} = l, config :: Config.t, now :: integer \\ monotonic_millis()) :: t do
+  defun reset_quorum_timer(%__MODULE__{quorum_timer: timer} = l, config :: Config.t) :: t do
     :gen_fsm.cancel_timer(timer)
-    %__MODULE__{l | quorum_timer: start_quorum_timer(config), quorum_timer_started_at: now}
+    %__MODULE__{l | quorum_timer: start_quorum_timer(config), quorum_timer_started_at: monotonic_millis()}
   end
 
   defunp start_heartbeat_timer(%Config{heartbeat_timeout: timeout}) :: reference do
@@ -35,20 +35,31 @@ defmodule RaftedValue.Leadership do
     :gen_fsm.send_event_after(max_election_timeout(config), :cannot_reach_quorum)
   end
 
+  # `follower_responded/4` is just for backward compatibility (older servers may call this), will be removed afterward
+  def follower_responded(leadership, members, follower, config) do
+    follower_responded(leadership, members, follower, nil, config)
+  end
+
   defun follower_responded(%__MODULE__{quorum_timer_started_at: started_at, follower_responded_times: times} = l,
-                           %Members{all: all},
-                           follower :: pid,
-                           config   :: Config.t) :: t do
-    now = monotonic_millis()
+                           %Members{all: all} = members,
+                           follower  :: pid,
+                           timestamp :: nil | integer, # `nil` only when either leader or follower is running rafted_value <= 0.1.8
+                           config    :: Config.t) :: t do
+    # if `nil` fallback to the older behaviour; it's actually incorrect but works fine except for extremely rare occasions
+    t = timestamp || monotonic_millis()
+    follower_pids = PidSet.delete(all, self()) |> PidSet.to_list
     new_times =
-      Map.put(times, follower, now)
-      |> Map.take(PidSet.delete(all, self()) |> PidSet.to_list) # filter by the actual members not to be disturbed by e.g. delayed message from removed member
+      Map.update(times, follower, t, &max(&1, t))
+      |> Map.take(follower_pids) # filter by the actual members, in order not to be disturbed by message from already-removed member
     new_leadership = %__MODULE__{l | follower_responded_times: new_times}
-    n_responded_since_timer_set = Enum.count(new_times, fn {_, time} -> started_at < time end)
-    if (n_responded_since_timer_set + 1) * 2 > PidSet.size(all) do
-      reset_quorum_timer(new_leadership, config, now)
-    else
-      new_leadership
+    case quorum_last_reached_at(new_leadership, members) do
+      nil        -> new_leadership
+      reached_at ->
+        if started_at < reached_at do
+          reset_quorum_timer(new_leadership, config)
+        else
+          new_leadership
+        end
     end
   end
 
@@ -87,10 +98,23 @@ defmodule RaftedValue.Leadership do
     %__MODULE__{leadership | follower_responded_times: Map.delete(times, follower)}
   end
 
-  defun minimum_timeout_elapsed_since_quorum_responded?(%__MODULE__{quorum_timer_started_at: t},
-                                                        %Config{election_timeout: timeout,
-                                                                election_timeout_clock_drift_margin: margin}) :: boolean do
-    t + timeout - margin <= monotonic_millis()
+  defun lease_expired?(leadership :: t,
+                       members    :: Members.t,
+                       %Config{election_timeout: timeout,
+                               election_timeout_clock_drift_margin: margin}) :: boolean do
+    case quorum_last_reached_at(leadership, members) do
+      nil        -> true
+      reached_at -> reached_at + timeout - margin <= monotonic_millis()
+    end
+  end
+
+  defunp quorum_last_reached_at(%__MODULE__{follower_responded_times: times}, %Members{all: all}) :: nil | integer do
+    case PidSet.size(all) do
+      0 -> nil
+      n ->
+        n_half_followers = div(n - 1, 2)
+        Map.values(times) |> Enum.sort |> Enum.drop(n_half_followers) |> List.first
+    end
   end
 
   defunp monotonic_millis :: integer do

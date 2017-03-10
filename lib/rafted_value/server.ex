@@ -147,7 +147,8 @@ defmodule RaftedValue.Server do
   def leader(%AppendEntriesResponse{from: from, success: success, i_replicated: i_replicated} = rpc,
              %State{members: members, current_term: current_term, leadership: leadership, logs: logs, config: config} = state) do
     become_follower_if_new_term_started(rpc, state, fn ->
-      new_leadership = Leadership.follower_responded(leadership, members, from, config)
+      # We don't assume existence of `:leader_timestamp` field in rpc message
+      new_leadership = Leadership.follower_responded(leadership, members, from, Map.get(rpc, :leader_timestamp), config)
       if success do
         {new_logs, applicable_entries} = Logs.set_follower_index(logs, members, current_term, from, i_replicated, config)
         new_state1 = %State{state | leadership: new_leadership, logs: new_logs}
@@ -155,7 +156,7 @@ defmodule RaftedValue.Server do
         case members do
           %Members{pending_leader_change: ^from} ->
             # now we know that the follower `from` is alive => make it a new leader
-            case Logs.make_append_entries_req(new_logs, current_term, from) do
+            case Logs.make_append_entries_req(new_logs, current_term, from, :erlang.monotonic_time(:milli_seconds)) do
               {:ok, append_req} ->
                 req = %TimeoutNow{append_entries_req: append_req}
                 send_event(new_state2, from, req)
@@ -170,7 +171,7 @@ defmodule RaftedValue.Server do
         # prev log from leader didn't match follower's => decrement "next index" for the follower and try to resend AppendEntries
         new_logs = Logs.decrement_next_index_of_follower(logs, from)
         %State{state | leadership: new_leadership, logs: new_logs}
-        |> send_append_entries(from)
+        |> send_append_entries(from, :erlang.monotonic_time(:milli_seconds))
         |> same_fsm_state
       end
     end)
@@ -200,8 +201,8 @@ defmodule RaftedValue.Server do
     |> broadcast_append_entries
     |> same_fsm_state
   end
-  def leader({:query, arg}, from, %State{current_term: term, leadership: leadership, logs: logs, config: config} = state) do
-    if Leadership.minimum_timeout_elapsed_since_quorum_responded?(leadership, config) do
+  def leader({:query, arg}, from, %State{members: members, current_term: term, leadership: leadership, logs: logs, config: config} = state) do
+    if Leadership.lease_expired?(leadership, members, config) do
       # if leader's lease has already expired, fall back to log replication (handled in the same way as commands)
       new_logs = Logs.add_entry(logs, config, fn index -> {term, index, :query, {from, arg}} end)
       %State{state | logs: new_logs}
@@ -284,15 +285,16 @@ defmodule RaftedValue.Server do
       new_state = %State{state | leadership: new_leadership, logs: new_logs}
       Enum.reduce(applicable_entries, new_state, &leader_apply_committed_log_entry/2)
     else
+      now = :erlang.monotonic_time(:milli_seconds)
       Enum.reduce(followers, state, fn(follower, s) ->
-        send_append_entries(s, follower)
+        send_append_entries(s, follower, now)
       end)
     end
     |> reset_heartbeat_timer
   end
 
-  defunp send_append_entries(%State{current_term: term, logs: logs} = state, follower :: pid) :: State.t do
-    case Logs.make_append_entries_req(logs, term, follower) do
+  defunp send_append_entries(%State{current_term: term, logs: logs} = state, follower :: pid, now :: integer) :: State.t do
+    case Logs.make_append_entries_req(logs, term, follower, now) do
       {:ok, req} ->
         send_event(state, follower, req)
         state
@@ -456,7 +458,7 @@ defmodule RaftedValue.Server do
   # common handler implementations
   #
   defp handle_append_entries_request(%AppendEntriesRequest{term: term, leader_pid: leader_pid, prev_log: prev_log,
-                                                           entries: entries, i_leader_commit: i_leader_commit},
+                                                           entries: entries, i_leader_commit: i_leader_commit} = append_req,
                                      %State{members: members, current_term: current_term, logs: logs, config: config} = state,
                                      current_state_name) do
     reply_as_failure = fn larger_term ->
@@ -473,7 +475,7 @@ defmodule RaftedValue.Server do
         new_members2 = Members.put_leader(new_members1, leader_pid)
         new_state1 = %State{state | members: new_members2, current_term: term, logs: new_logs}
         new_state2 = Enum.reduce(applicable_entries, new_state1, &nonleader_apply_committed_log_entry/2)
-        reply = %AppendEntriesResponse{from: self(), term: term, success: true, i_replicated: new_logs.i_max}
+        reply = %AppendEntriesResponse{from: self(), term: term, success: true, i_replicated: new_logs.i_max} |> put_leader_timestamp(append_req)
         send_event(new_state2, leader_pid, reply)
         new_state2
       else
@@ -484,6 +486,15 @@ defmodule RaftedValue.Server do
       end
       |> reset_election_timer_on_leader_message
       |> next_state(:follower)
+    end
+  end
+
+  defp put_leader_timestamp(append_resp, append_req) do
+    # We don't assume existence of `:leader_timestamp` field for backward compatibility:
+    # leader running rafted_value <= 0.1.8 don't include `:leader_timestamp` field in AppendEntriesRequest.
+    case Map.get(append_req, :leader_timestamp) do
+      nil -> append_resp
+      t   -> %AppendEntriesResponse{append_resp | leader_timestamp: t}
     end
   end
 
@@ -581,8 +592,8 @@ defmodule RaftedValue.Server do
   end
 
   defunp leader_authority_timed_out?(current_state_name :: atom, state :: State.t) :: boolean do
-    (:leader, %State{leadership: leadership, config: config}) ->
-      Leadership.minimum_timeout_elapsed_since_quorum_responded?(leadership, config)
+    (:leader, %State{members: members, leadership: leadership, config: config}) ->
+      Leadership.lease_expired?(leadership, members, config)
     (_, %State{election: election, config: config}) ->
       Election.minimum_timeout_elapsed_since_last_leader_message?(election, config)
   end

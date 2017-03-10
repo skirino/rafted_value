@@ -6,20 +6,22 @@ defmodule RaftedValue.RPC do
 
   defmodule AppendEntriesRequest do
     use Croma.Struct, fields: [
-      leader_pid:      Croma.Pid,
-      term:            TermNumber,
-      prev_log:        LogInfo,
-      entries:         TG.list_of(LogEntry),
-      i_leader_commit: LogIndex,
+      leader_pid:       Croma.Pid,
+      term:             TermNumber,
+      prev_log:         LogInfo,
+      entries:          TG.list_of(LogEntry),
+      i_leader_commit:  LogIndex,
+      leader_timestamp: TG.nilable(Croma.Integer),
     ]
   end
 
   defmodule AppendEntriesResponse do
     use Croma.Struct, fields: [
-      from:         Croma.Pid,
-      term:         TermNumber,
-      success:      Croma.Boolean,
-      i_replicated: TG.nilable(LogIndex),
+      from:             Croma.Pid,
+      term:             TermNumber,
+      success:          Croma.Boolean,
+      i_replicated:     TG.nilable(LogIndex),
+      leader_timestamp: TG.nilable(Croma.Integer),
     ]
   end
 

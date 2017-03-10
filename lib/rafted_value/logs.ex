@@ -50,7 +50,8 @@ defmodule RaftedValue.Logs do
 
   defun make_append_entries_req(%__MODULE__{map: m, i_min: i_min, i_max: i_max, i_committed: i_c, followers: followers} = logs,
                                 term         :: TermNumber.t,
-                                follower_pid :: pid) :: {:ok, AppendEntriesRequest.t} | {:too_old, t} | :error do
+                                follower_pid :: pid,
+                                now          :: integer) :: {:ok, AppendEntriesRequest.t} | {:too_old, t} | :error do
     case followers[follower_pid] do
       nil         -> :error
       {i_next, _} ->
@@ -66,11 +67,12 @@ defmodule RaftedValue.Logs do
               entry -> elem(entry, 0)
             end
           %AppendEntriesRequest{
-            term:            term,
-            leader_pid:      self(),
-            prev_log:        {term_prev, i_prev},
-            entries:         slice_entries(m, i_next, i_max),
-            i_leader_commit: i_c,
+            term:             term,
+            leader_pid:       self(),
+            prev_log:         {term_prev, i_prev},
+            entries:          slice_entries(m, i_next, i_max),
+            i_leader_commit:  i_c,
+            leader_timestamp: now,
           } |> R.pure
         end
     end
