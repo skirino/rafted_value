@@ -18,8 +18,8 @@
 
 ## Notes on backward compatibility
 
-- Users of `<= 0.1.8` should upgrade to `0.1.10` before upgrading to `>= 0.2.0`
-    - RPC protocol of `<= 0.1.8` and that of `>= 0.2.0` are not compatible
+- Users of `<= 0.1.8` should upgrade to `0.1.10` before upgrading to `>= 0.2.0`.
+    - RPC protocol of `<= 0.1.8` and that of `>= 0.2.0` are slightly incompatible
     - Version `0.1.10` should be able to interact with both `<= 0.1.8` and `>= 0.2.0`
 
 ## Example
@@ -69,22 +69,22 @@ iex(baz@skirino-Manjaro)3> {:ok, _} = RaftedValue.start_link({:join_existing_con
 Now you can run commands on the replicated value:
 
 ```ex
-iex(foo@skirino-Manjaro)6> RaftedValue.command(:foo, {:enqueue, 1})
+iex(foo@skirino-Manjaro)6> RaftedValue.command(:foo, {:enqueue, "a"})
 {:ok, 0}
-iex(foo@skirino-Manjaro)7> RaftedValue.command(:foo, {:enqueue, 2})
+iex(foo@skirino-Manjaro)7> RaftedValue.command(:foo, {:enqueue, "b"})
 {:ok, 1}
-iex(foo@skirino-Manjaro)8> RaftedValue.command(:foo, {:enqueue, 3})
+iex(foo@skirino-Manjaro)8> RaftedValue.command(:foo, {:enqueue, "c"})
 {:ok, 2}
-iex(foo@skirino-Manjaro)9> RaftedValue.command(:foo, {:enqueue, 4})
+iex(foo@skirino-Manjaro)9> RaftedValue.command(:foo, {:enqueue, "d"})
 {:ok, 3}
-iex(foo@skirino-Manjaro)10> RaftedValue.command(:foo, {:enqueue, 5})
+iex(foo@skirino-Manjaro)10> RaftedValue.command(:foo, {:enqueue, "e"})
 {:ok, 4}
 
 iex(bar@skirino-Manjaro)4> RaftedValue.command({:foo, :"foo@skirino-Manjaro"}, :dequeue)
-{:ok, 1}
+{:ok, "a"}
 iex(bar@skirino-Manjaro)5> RaftedValue.command({:foo, :"foo@skirino-Manjaro"}, :dequeue)
-{:ok, 2}
-iex(bar@skirino-Manjaro)6> RaftedValue.command({:foo, :"foo@skirino-Manjaro"}, {:enqueue, 6})
+{:ok, "b"}
+iex(bar@skirino-Manjaro)6> RaftedValue.command({:foo, :"foo@skirino-Manjaro"}, {:enqueue, "f"})
 {:ok, 3}
 iex(bar@skirino-Manjaro)7> RaftedValue.query({:foo, :"foo@skirino-Manjaro"}, :length)
 {:ok, 4}

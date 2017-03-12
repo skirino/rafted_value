@@ -175,7 +175,7 @@ defmodule RaftedValue do
   @doc """
   Retrieves status of a member in a consensus group.
   """
-  defun status(server :: GenServer.server) :: status_result do
-    :gen_fsm.sync_send_all_state_event(server, :status)
+  defun status(server :: GenServer.server, timeout :: timeout \\ 5000) :: status_result do
+    :gen_fsm.sync_send_all_state_event(server, :status, timeout)
   end
 end
