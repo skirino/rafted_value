@@ -462,7 +462,7 @@ defmodule RaftedValue.Server do
                                      %State{members: members, current_term: current_term, logs: logs, config: config} = state,
                                      current_state_name) do
     reply_as_failure = fn larger_term ->
-      send_event(state, leader_pid, %AppendEntriesResponse{from: self(), term: larger_term, success: false})
+      send_event(state, leader_pid, %AppendEntriesResponse{from: self(), term: larger_term, success: false} |> put_leader_timestamp(append_req))
     end
 
     if term < current_term do
