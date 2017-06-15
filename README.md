@@ -55,7 +55,7 @@ defmodule QueueWithLength do
 end
 ```
 
-Then we can make a 3-member consensus group as follows:
+Then make a 3-member consensus group by spawning one process per node as follows:
 
 ```ex
 iex(foo@skirino-Manjaro)2> config = RaftedValue.make_config(QueueWithLength)

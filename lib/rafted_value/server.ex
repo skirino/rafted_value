@@ -159,7 +159,7 @@ defmodule RaftedValue.Server do
               {:ok, append_req} ->
                 req = %TimeoutNow{append_entries_req: append_req}
                 send_event(new_state2, from, req)
-                convert_state_as_follower(new_state2, current_term) |> next_state(:follower) # step down in order not to server client requests any more
+                convert_state_as_follower(new_state2, current_term) |> next_state(:follower) # step down in order not to serve client requests any more
               {:too_old, _} ->
                 # `from`'s logs lags too behind => try next time
                 same_fsm_state(new_state2)
