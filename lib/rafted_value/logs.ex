@@ -2,21 +2,6 @@ use Croma
 alias Croma.TypeGen, as: TG
 alias Croma.Result, as: R
 
-defmodule RaftedValue.LogEntry do
-  alias RaftedValue.{TermNumber, LogIndex, Config}
-  @type t :: {TermNumber.t, LogIndex.t, :command        , {GenServer.from, Data.command_arg, reference}}
-           | {TermNumber.t, LogIndex.t, :query          , {GenServer.from, Data.query_arg}}
-           | {TermNumber.t, LogIndex.t, :change_config  , Config.t}
-           | {TermNumber.t, LogIndex.t, :leader_elected , pid}
-           | {TermNumber.t, LogIndex.t, :add_follower   , pid}
-           | {TermNumber.t, LogIndex.t, :remove_follower, pid}
-
-  defun validate(v :: any) :: R.t(t) do
-    {_, _, _, _} = t -> {:ok, t}
-    _                -> {:error, {:invalid_value, [__MODULE__]}}
-  end
-end
-
 defmodule RaftedValue.LogsMap do
   alias RaftedValue.LogIndex
   use Croma.SubtypeOfMap, key_module: LogIndex, value_module: Croma.Tuple
@@ -37,7 +22,7 @@ defmodule RaftedValue.Logs do
   #
   # for leader
   #
-  defun new_for_lonely_leader :: t do
+  defun new_for_lonely_leader() :: t do
     first_entry = {0, 1, :leader_elected, self()}
     %__MODULE__{map: %{1 => first_entry}, i_min: 1, i_max: 1, i_committed: 1, followers: %{}}
   end
