@@ -7,7 +7,7 @@ defmodule RaftedValue.Server do
   # ## Events
   #
   # - async (member-to-member messages)
-  #   - defined in Raft (all contains `term`)
+  #   - defined in Raft (all contain `term`)
   #     - AppendEntriesRequest
   #     - AppendEntriesResponse
   #     - RequestVoteRequest

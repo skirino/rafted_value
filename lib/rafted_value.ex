@@ -16,9 +16,9 @@ defmodule RaftedValue do
 
   - `{:create_new_consensus_group, Config.t}`: Creates a new consensus group using the given `Config.t`.
     The group's only member is the newly-created process and it is spawned as the leader.
-  - `{:join_existing_consensus_group, [servers]}`: Joins an already running consensus grouop as a new follower.
+  - `{:join_existing_consensus_group, [member]}`: Joins an already running consensus group as a new follower.
 
-  The second argument is (if given) used for name registration.
+  The second argument is (if given) used for local name registration.
   """
   defun start_link(info :: consensus_group_info, name_or_nil :: g[atom] \\ nil) :: GenServer.on_start do
     case info do
