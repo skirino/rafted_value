@@ -188,9 +188,7 @@ defmodule RaftedValue.Logs do
                        entries         :: [LogEntry.t],
                        i_leader_commit :: LogIndex.t,
                        config          :: Config.t) :: {t, Members.t, [LogEntry.t]} do
-    new_map = Enum.reduce(entries, map, fn(entry, m) ->
-      Map.put(m, elem(entry, 1), entry)
-    end)
+    new_map         = Enum.into(entries, map, fn {_, index, _, _} = entry -> {index, entry} end)
     new_i_max       = if Enum.empty?(entries), do: i_max, else: max(i_max, elem(List.last(entries), 1))
     new_i_committed = max(old_i_committed, i_leader_commit)
     new_logs        = %__MODULE__{logs | map: new_map, i_max: new_i_max, i_committed: new_i_committed} |> truncate_old_logs(config)
