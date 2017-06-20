@@ -19,21 +19,31 @@ defmodule RaftedValue do
   - `{:join_existing_consensus_group, [member]}`: Joins an already running consensus group as a new follower.
 
   The second argument is (if given) used for local name registration.
+
+  The third argument (if given) specifies the directory path to store both Raft logs and periodic snapshots.
+  If `nil` is passed the process won't persist its state.
+  The specified directory will be created if not present.
+  Note that it's the caller's responsibility to ensure the followings:
+
+  - The specified directory is not used by other `RaftedValue` process.
+  - The contents of the specified directory is cleaned-up if necessary.
+    RaftedValue never removes latest logs/snapshots on process termination;
+    if you want to start a new RaftedValue process from scratch you have to remove existing files beforehand.
   """
-  defun start_link(info :: consensus_group_info, name_or_nil :: g[atom] \\ nil) :: GenServer.on_start do
+  defun start_link(info :: consensus_group_info, name_or_nil :: g[atom] \\ nil, persistence_dir :: nil | Path.t \\ nil) :: GenServer.on_start do
     case info do
       {:create_new_consensus_group   , %Config{}    }                             -> :ok
       {:join_existing_consensus_group, known_members} when is_list(known_members) -> :ok
       # raise otherwise
     end
-    start_link_impl(info, name_or_nil)
+    start_link_impl(info, name_or_nil, persistence_dir)
   end
 
-  defp start_link_impl(info, name) do
-    if name do
-      :gen_fsm.start_link({:local, name}, Server, info, [])
-    else
-      :gen_fsm.start_link(Server, info, [])
+  defp start_link_impl(info, name_or_nil, persistence_dir) do
+    init_arg = {info, persistence_dir}
+    case name_or_nil do
+      nil  -> :gen_fsm.start_link(                Server, init_arg, [])
+      name -> :gen_fsm.start_link({:local, name}, Server, init_arg, [])
     end
   end
 

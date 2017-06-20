@@ -130,14 +130,21 @@ defmodule RaftedValue.Logs do
     end
   end
 
-  defun add_entry(%__MODULE__{map: map, i_max: i_max} = logs, config :: Config.t, f :: (LogIndex.t -> LogEntry.t)) :: t do
+  defun add_entry(%__MODULE__{map: map, i_max: i_max} = logs,
+                  config :: Config.t,
+                  f      :: (LogIndex.t -> LogEntry.t)) :: {t, LogEntry.t} do
     i = i_max + 1
     entry = f.(i)
-    %__MODULE__{logs | map: Map.put(map, i, entry), i_max: i}
-    |> truncate_old_logs(config)
+    new_logs =
+      %__MODULE__{logs | map: Map.put(map, i, entry), i_max: i}
+      |> truncate_old_logs(config)
+    {new_logs, entry}
   end
 
-  defun elected_leader(%__MODULE__{i_max: i_max} = logs, members :: Members.t, term :: TermNumber.t, config :: Config.t) :: t do
+  defun add_entry_on_elected_leader(%__MODULE__{i_max: i_max} = logs,
+                                    members :: Members.t,
+                                    term    :: TermNumber.t,
+                                    config  :: Config.t) :: {t, LogEntry.t} do
     follower_index_pair = {i_max + 1, 0}
     followers =
       Members.other_members_list(members)
@@ -146,21 +153,19 @@ defmodule RaftedValue.Logs do
     |> add_entry(config, fn i -> {term, i, :leader_elected, self()} end)
   end
 
-  defun prepare_to_add_follower(%__MODULE__{i_max: i_max, followers: followers} = logs,
-                                term         :: TermNumber.t,
-                                new_follower :: pid,
-                                config       :: Config.t) :: {t, LogEntry.t} do
-    new_logs1 = %__MODULE__{logs | followers: Map.put(followers, new_follower, {i_max + 1, 0})}
-    new_logs2 = add_entry(new_logs1, config, fn i -> {term, i, :add_follower, new_follower} end)
-    {new_logs2, new_logs2.map[new_logs2.i_max]}
+  defun add_entry_on_add_follower(%__MODULE__{i_max: i_max, followers: followers} = logs,
+                                  term         :: TermNumber.t,
+                                  new_follower :: pid,
+                                  config       :: Config.t) :: {t, LogEntry.t} do
+    %__MODULE__{logs | followers: Map.put(followers, new_follower, {i_max + 1, 0})}
+    |> add_entry(config, fn i -> {term, i, :add_follower, new_follower} end)
   end
 
-  defun prepare_to_remove_follower(%__MODULE__{} = logs,
-                                   term               :: TermNumber.t,
-                                   follower_to_remove :: pid,
-                                   config             :: Config.t) :: {t, LogEntry.t} do
-    new_logs = add_entry(logs, config, fn i -> {term, i, :remove_follower, follower_to_remove} end)
-    {new_logs, new_logs.map[new_logs.i_max]}
+  defun add_entry_on_remove_follower(%__MODULE__{} = logs,
+                                     term               :: TermNumber.t,
+                                     follower_to_remove :: pid,
+                                     config             :: Config.t) :: {t, LogEntry.t} do
+    add_entry(logs, config, fn i -> {term, i, :remove_follower, follower_to_remove} end)
   end
 
   #

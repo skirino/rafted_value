@@ -21,12 +21,14 @@ defmodule RaftedValueTest do
 
   @t_max_election_timeout @conf.election_timeout * 2
 
+  @tmp_dir "tmp"
+
   defp assert_equal_as_set(set1, set2) do
     assert Enum.sort(set1) == Enum.sort(set2)
   end
 
   defp wait_until_member_change_completes(leader) do
-    :timer.sleep(10)
+    :timer.sleep(20)
     {:leader, state} = :sys.get_state(leader)
     members = state.members
     if members.uncommitted_membership_change && members.pending_leader_change do
@@ -44,15 +46,20 @@ defmodule RaftedValueTest do
     end
   end
 
-  defp add_follower(leader, name \\ nil) do
-    {:ok, follower} = RaftedValue.start_link({:join_existing_consensus_group, [leader]}, name)
+  defp add_follower(leader, name \\ nil, persistence_dir \\ nil) do
+    {:ok, follower} = RaftedValue.start_link({:join_existing_consensus_group, [leader]}, name, persistence_dir)
     wait_until_member_change_completes(leader)
     follower
   end
 
-  defp make_cluster(n_follower, config \\ @conf) do
-    {:ok, leader} = RaftedValue.start_link({:create_new_consensus_group, config})
-    followers = Enum.map(1 .. n_follower, fn _ -> add_follower(leader) end)
+  defp make_cluster(n_follower, config \\ @conf, persist? \\ false) do
+    dir = if persist?, do: Path.join(@tmp_dir, "leader"), else: nil
+    {:ok, leader} = RaftedValue.start_link({:create_new_consensus_group, config}, nil, dir)
+    followers =
+      Enum.map(1 .. n_follower, fn i ->
+        dir = if persist?, do: Path.join(@tmp_dir, "follower#{i}"), else: nil
+        add_follower(leader, nil, dir)
+      end)
     {leader, followers}
   end
 
@@ -75,8 +82,11 @@ defmodule RaftedValueTest do
   end
 
   setup do
+    File.rm_rf!(@tmp_dir)
     Process.flag(:trap_exit, true)
-    :ok
+    on_exit(fn ->
+      File.rm_rf!(@tmp_dir)
+    end)
   end
 
   test "should appropriately start/add/remove/stop server" do
@@ -686,11 +696,11 @@ defmodule RaftedValueTest do
     end
   end
 
-  defp start_cluster_and_client(config) do
+  defp start_cluster_and_client(config, persist?) do
     Process.register(self(), :test_runner)
-    {leader, [follower1, follower2]} = make_cluster(2, config)
-    assert_received({:follower_added, ^follower1})
-    assert_received({:follower_added, ^follower2})
+    {leader, [follower1, follower2]} = make_cluster(2, config, persist?)
+    assert_receive({:follower_added, ^follower1})
+    assert_receive({:follower_added, ^follower2})
 
     initial_members = [leader, follower1, follower2]
     context =
@@ -726,14 +736,22 @@ defmodule RaftedValueTest do
     assert length(Enum.uniq(indices)) == 1
   end
 
-  test "3,4,5,6,7-member cluster should maintain invariants and keep responsive in the face of minority failure" do
+  defp run_consensus_group_and_check_responsiveness_with_minority_failures(persist?) do
     config = Map.put(@conf, :leader_hook_module, MessageSendingHook)
-    {context, client_pid} = start_cluster_and_client(config)
+    {context, client_pid} = start_cluster_and_client(config, persist?)
 
     new_context = repeatedly_change_cluster_configuration(context, client_pid, 50)
 
     finish_client_process(client_pid)
     assert_all_members_up_to_date(new_context)
+  end
+
+  test "3,4,5,6,7-member cluster should maintain invariants and keep responsive in the face of minority failure (non-persisted)" do
+    run_consensus_group_and_check_responsiveness_with_minority_failures(false)
+  end
+
+  test "3,4,5,6,7-member cluster should maintain invariants and keep responsive in the face of minority failure (persisted)" do
+    run_consensus_group_and_check_responsiveness_with_minority_failures(true)
   end
 
   defmodule CommunicationWithNetsplit do
@@ -767,13 +785,13 @@ defmodule RaftedValueTest do
     end
   end
 
-  test "3,4,5,6,7-member cluster should maintain invariants and keep responsive during non-critical netsplit" do
-    CommunicationWithNetsplit.start
+  defp run_consensus_group_and_check_responsiveness_with_non_critical_netsplit(persist?) do
+    CommunicationWithNetsplit.start()
     config =
       @conf
       |> Map.put(:leader_hook_module, MessageSendingHook)
       |> Map.put(:communication_module, CommunicationWithNetsplit)
-    {context, client_pid} = start_cluster_and_client(config)
+    {context, client_pid} = start_cluster_and_client(config, persist?)
 
     new_context =
       Enum.reduce(1 .. 10, context, fn(_, c1) ->
@@ -807,5 +825,13 @@ defmodule RaftedValueTest do
 
     finish_client_process(client_pid)
     assert_all_members_up_to_date(new_context)
+  end
+
+  test "3,4,5,6,7-member cluster should maintain invariants and keep responsive during non-critical netsplit (non-persisted)" do
+    run_consensus_group_and_check_responsiveness_with_non_critical_netsplit(false)
+  end
+
+  test "3,4,5,6,7-member cluster should maintain invariants and keep responsive during non-critical netsplit (persisted)" do
+    run_consensus_group_and_check_responsiveness_with_non_critical_netsplit(true)
   end
 end
