@@ -248,12 +248,9 @@ defmodule RaftedValue.Logs do
 
   defunp truncate_old_logs(%__MODULE__{map: map, i_min: i_min, i_committed: i_c} = logs,
                            %Config{max_retained_committed_logs: max_logs}) :: t do
-    new_i_min = i_c - max_logs + 1
-    if new_i_min > i_min do
-      new_map = Enum.reduce(i_min .. new_i_min - 1, map, fn(i, m) -> Map.delete(m, i) end)
-      %__MODULE__{logs | map: new_map, i_min: new_i_min}
-    else
-      logs
+    case i_c - max_logs + 1 do
+      new_i_min when new_i_min > i_min -> %__MODULE__{logs | map: Map.drop(map, i_min .. new_i_min - 1), i_min: new_i_min}
+      _                                -> logs
     end
   end
 end
