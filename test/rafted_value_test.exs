@@ -419,7 +419,7 @@ defmodule RaftedValueTest do
     end
   end
 
-  test "query should be 3-member cluster should not maintain invariants even with network delay" do
+  test "leader should directly answer queries if leader lease is valid; should not if expired" do
     # carefully crafted configuration to reproduce a bug in rafted_value <= 0.1.8
     config =
       @conf
@@ -439,7 +439,7 @@ defmodule RaftedValueTest do
     assert :gen_fsm.stop(follower2)             == :ok
     assert RaftedValue.query(leader, :get)      == {:ok, 1}           # lease available, can answer the query solely by the leader
     :timer.sleep(20)                                                  # 100ms elapsed, lease expired
-    assert RaftedValue.query(leader, :get, 100) == {:error, :timeout} # cannot confirm that the leader's value is latest
+    assert RaftedValue.query(leader, :get, 100) == {:error, :timeout} # cannot confirm whether the leader's value is still the latest
   end
 
   #
