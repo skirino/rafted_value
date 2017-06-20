@@ -141,7 +141,7 @@ defmodule RaftedValue.Logs do
     follower_index_pair = {i_max + 1, 0}
     followers =
       Members.other_members_list(members)
-      |> Enum.into(%{}, fn follower -> {follower, follower_index_pair} end)
+      |> Map.new(fn follower -> {follower, follower_index_pair} end)
     %__MODULE__{logs | followers: followers}
     |> add_entry(config, fn i -> {term, i, :leader_elected, self()} end)
   end
