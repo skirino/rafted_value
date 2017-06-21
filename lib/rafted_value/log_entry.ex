@@ -35,17 +35,31 @@ defmodule RaftedValue.LogEntry do
     <<term :: size(64), index :: size(64), entry_type_to_tag(entry_type) :: size(8), byte_size(bin) :: size(64), bin :: binary>>
   end
 
-  defun extract_from_binary(bin :: binary) :: nil | {t, rest :: binary} do
+  defunpt extract_from_binary(bin :: binary) :: nil | {t, rest :: binary} do
     with <<term :: size(64), index :: size(64), type_tag :: size(8), size :: size(64)>> <> rest1 <- bin,
-         {:ok, entry_type} <- tag_to_entry_type(type_tag),
+         {:ok, entry_type} = tag_to_entry_type(type_tag),
          <<others_bin :: binary-size(size) >> <> rest2 <- rest1 do
-      try do
-        {{term, index, entry_type, :erlang.binary_to_term(others_bin)}, rest2}
-      rescue
-        ArgumentError -> nil
-      end
+      {{term, index, entry_type, :erlang.binary_to_term(others_bin)}, rest2}
     else
-      _ -> nil
+      _ -> nil # insufficient input, can be retried with subsequent binary data
     end
+  end
+
+  defunp extract_multiple_from_binary(bin :: binary) :: {[t], rest :: binary} do
+    extract_multiple_from_binary_impl(bin, [])
+  end
+
+  defp extract_multiple_from_binary_impl(bin, acc) do
+    case extract_from_binary(bin) do
+      nil           -> {Enum.reverse(acc), bin}
+      {entry, rest} -> extract_multiple_from_binary_impl(rest, [entry | acc])
+    end
+  end
+
+  def read_as_stream(log_path) do
+    File.stream!(log_path, [], 4096)
+    |> Stream.transform(<<>>, fn(bin, carryover) ->
+      extract_multiple_from_binary(carryover <> bin)
+    end)
   end
 end

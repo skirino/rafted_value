@@ -2,6 +2,16 @@ defmodule RaftedValueTest do
   use ExUnit.Case
   alias RaftedValue.PidSet
 
+  @tmp_dir "tmp"
+
+  setup do
+    File.rm_rf!(@tmp_dir)
+    Process.flag(:trap_exit, true)
+    on_exit(fn ->
+      File.rm_rf!(@tmp_dir)
+    end)
+  end
+
   defmodule JustAnInt do
     @behaviour RaftedValue.Data
     def new, do: 0
@@ -20,8 +30,6 @@ defmodule RaftedValueTest do
   ])
 
   @t_max_election_timeout @conf.election_timeout * 2
-
-  @tmp_dir "tmp"
 
   defp assert_equal_as_set(set1, set2) do
     assert Enum.sort(set1) == Enum.sort(set2)
@@ -79,14 +87,6 @@ defmodule RaftedValueTest do
     ref = make_ref()
     send(dest, {:"$gen_sync_event", {self(), ref}, event})
     ref
-  end
-
-  setup do
-    File.rm_rf!(@tmp_dir)
-    Process.flag(:trap_exit, true)
-    on_exit(fn ->
-      File.rm_rf!(@tmp_dir)
-    end)
   end
 
   test "should appropriately start/add/remove/stop server" do
