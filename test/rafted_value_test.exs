@@ -12,15 +12,6 @@ defmodule RaftedValueTest do
     end)
   end
 
-  defmodule JustAnInt do
-    @behaviour RaftedValue.Data
-    def new, do: 0
-    def command(i, :get     ), do: {i, i    }
-    def command(i, {:set, j}), do: {i, j    }
-    def command(i, :inc     ), do: {i, i + 1}
-    def query(i, :get), do: i
-  end
-
   @conf RaftedValue.make_config(JustAnInt, [
     heartbeat_timeout:                   100,
     election_timeout:                    500,

@@ -19,12 +19,18 @@ defmodule RaftedValue.Logs do
     followers:   TG.nilable(FollowerIndices),
   ]
 
+  defunp new_with_last_entry({_, index, _, _} = entry :: LogEntry.t) :: t do
+    %__MODULE__{map: %{index => entry}, i_min: index, i_max: index, i_committed: index}
+  end
+
   #
   # for leader
   #
-  defun new_for_lonely_leader() :: t do
-    first_entry = {0, 1, :leader_elected, self()}
-    %__MODULE__{map: %{1 => first_entry}, i_min: 1, i_max: 1, i_committed: 1, followers: %{}}
+  defun new_for_lonely_leader(last_committed_entry :: LogEntry.t, entries_to_append :: Enum.t(LogEntry.t)) :: t do
+    logs = new_with_last_entry(last_committed_entry) |> Map.put(:followers, %{})
+    Enum.reduce(entries_to_append, logs, fn({_, i, _, _} = entry, %__MODULE__{map: m} = l) ->
+      %__MODULE__{l | map: Map.put(m, i, entry), i_max: i}
+    end)
   end
 
   defun commit_to_latest(%__MODULE__{map: map, i_max: i_max, i_committed: i_c} = logs, config :: Config.t) :: {t, [LogEntry.t]} do
@@ -171,9 +177,8 @@ defmodule RaftedValue.Logs do
   #
   # for non-leader
   #
-  defun new_for_new_follower({_, i_committed, _, _} = last_committed_entry :: LogEntry.t) :: t do
-    m = %{i_committed => last_committed_entry}
-    %__MODULE__{map: m, i_min: i_committed, i_max: i_committed, i_committed: i_committed}
+  defun new_for_new_follower(last_committed_entry :: LogEntry.t) :: t do
+    new_with_last_entry(last_committed_entry)
   end
 
   defun contain_given_prev_log?(%__MODULE__{map: m}, {term_prev, i_prev}) :: boolean do

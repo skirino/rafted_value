@@ -42,7 +42,7 @@ defmodule RaftedValue.LogEntryTest do
     bin = :erlang.term_to_binary(self())
     [
       <<>>,
-      <<1 :: size(64), 2 :: size(64), 3 :: size(8), byte_size(bin) + 10  :: size(64), bin :: binary>>, # insufficient data
+      <<1 :: size(64), 2 :: size(64), 3 :: size(8), byte_size(bin) + 10 :: size(64), bin :: binary>>, # insufficient data
     ] |> Enum.each(fn b ->
       assert LogEntry.extract_from_binary(b) == nil
     end)
@@ -57,14 +57,18 @@ defmodule RaftedValue.LogEntryTest do
 
   test "read_as_stream/1" do
     dir = Path.join(@tmp_dir, "log_entry_test")
-    persistence1 = Persistence.new_for_dir(dir)
-    l = make_entries_list()
-    entries = Enum.map(1..100, fn _ -> Enum.random(l) end)
+    File.mkdir_p!(dir)
+    initial_entry = {0, 1, :leader_elected, self()}
+    meta          = %Persistence.SnapshotMetadata{path: Path.join(dir, "snapshot_0_1"), term: 0, last_committed_index: 1, size: 100}
+    persistence1  = Persistence.new_with_disk_snapshot(dir, meta, initial_entry)
+
+    l            = make_entries_list()
+    entries      = Enum.map(1..100, fn _ -> Enum.random(l) end)
     persistence2 = Persistence.write_log_entries(persistence1, entries)
     assert persistence2.log_size_written >= 4096
 
-    [log_path] = Path.wildcard(Path.join(dir, "log.*"))
+    [log_path] = Path.wildcard(Path.join(dir, "log_*"))
     stream = LogEntry.read_as_stream(log_path)
-    assert Enum.to_list(stream) == entries
+    assert Enum.to_list(stream) == [initial_entry | entries]
   end
 end
