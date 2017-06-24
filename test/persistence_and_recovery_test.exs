@@ -44,7 +44,8 @@ defmodule RaftedValue.PersistenceAndRecoveryTest do
       read_all_live_log_entries(i_committed)
       |> Enum.drop_while(fn {_, i, _, _} -> i < i_committed end)
       |> Map.new(fn {_, i, _, _} = e -> {i, e} end)
-    assert m_disk == logs.map
+    # `logs.map` may contain extra entries which have been discarded in disk by log compaction
+    assert m_disk == Map.take(logs.map, Map.keys(m_disk))
   end
 
   defp read_snapshot(path) do
@@ -84,5 +85,24 @@ defmodule RaftedValue.PersistenceAndRecoveryTest do
     {:ok, _} = RaftedValue.start_link({:create_new_consensus_group, @config}, @name, @tmp_dir)
     assert in_memory_and_disk_logs_same?(snapshot_committed_index2 .. snapshot_committed_index1 + 24)
     assert RaftedValue.query(@name, :get) == {:ok, 21}
+    assert :gen_fsm.stop(@name) == :ok
+  end
+
+  test "uncommitted logs should be committed by lonely leader immediately after recovery" do
+    {:ok, l} = RaftedValue.start_link({:create_new_consensus_group, @config}, nil, @tmp_dir)
+    {:ok, f} = RaftedValue.start_link({:join_existing_consensus_group, [l]}, nil, nil)
+    assert MapSet.new(RaftedValue.status(l).members) == MapSet.new([l, f])
+    assert :gen_fsm.stop(f) == :ok
+
+    # Now incoming commands won't be committed
+    Enum.each(1..3, fn _ ->
+      assert RaftedValue.command(l, :inc, 100) == {:error, :timeout}
+    end)
+    assert :gen_fsm.stop(l) == :ok
+
+    # Restore from snapshot, commands should be applied
+    {:ok, _} = RaftedValue.start_link({:create_new_consensus_group, @config}, @name, @tmp_dir)
+    assert RaftedValue.query(@name, :get) == {:ok, 3}
+    assert :gen_fsm.stop(@name) == :ok
   end
 end

@@ -16,7 +16,6 @@ defmodule RaftedValueTest do
     heartbeat_timeout:                   100,
     election_timeout:                    500,
     election_timeout_clock_drift_margin: 100,
-    max_retained_committed_logs:         10,
     max_retained_command_results:        10,
   ])
 
@@ -502,13 +501,15 @@ defmodule RaftedValueTest do
   end
 
   defp assert_invariants(%{working: working, isolated: isolated} = context) do
+    :timer.sleep(100)
     members_alive = working ++ isolated
     member_state_pairs = Enum.map(members_alive, fn m -> {m, :sys.get_state(m)} end)
     new_context =
       Enum.reduce(member_state_pairs, context, fn({member, {state_name, state}}, context0) ->
         {:ok, _} = RaftedValue.Server.State.validate(state)
         assert_server_state_invariants(member, state_name, state)
-        assert_server_logs_invariants(state.logs, state.config)
+        assert_server_logs_invariants(state.logs, state.persistence)
+        assert_server_persistence_invariants(state_name, state.logs, state.persistence)
         assert_server_data_invariants(context0, state)
       end)
     assert_cluster_wide_invariants(new_context, member_state_pairs)
@@ -546,11 +547,25 @@ defmodule RaftedValueTest do
     refute state.leadership
   end
 
-  defp assert_server_logs_invariants(logs, config) do
+  defp assert_server_logs_invariants(logs, persistence) do
     assert logs.i_min       <= logs.i_committed
     assert logs.i_committed <= logs.i_max
     assert_equal_as_set(Map.keys(logs.map), logs.i_min .. logs.i_max)
-    assert logs.i_committed - logs.i_min + 1 <= config.max_retained_committed_logs
+    if is_nil(persistence) do
+      assert logs.i_committed - logs.i_min + 1 <= 100
+    end
+  end
+
+  defp assert_server_persistence_invariants(state_name, logs, persistence) do
+    if persistence do
+      meta = persistence.latest_snapshot_metadata
+      if meta do
+        assert meta.last_committed_index <= logs.i_committed
+        if state_name == :leader do # TODO: This condition should be removed
+          assert logs.i_min <= meta.last_committed_index + 1 # `logs` must contain all non-compacted entries (if any)
+        end
+      end
+    end
   end
 
   defp assert_server_data_invariants(context, state) do
@@ -567,6 +582,7 @@ defmodule RaftedValueTest do
         |> assert_gte_and_put_in_context([:commit_indices, member], state.logs.i_committed)
       end)
     leader_pairs = Enum.filter(member_state_pairs, &match?({_, {:leader, _}}, &1))
+    assert leader_pairs != []
     context2 = Enum.reduce(leader_pairs, context1, fn({member, {_, leader_state}}, context) ->
       assert_equal_or_put_in_context(context, [:leaders, leader_state.current_term], member)
     end)
@@ -625,16 +641,11 @@ defmodule RaftedValueTest do
   def op_remove_follower(%{working: working, killed: killed, isolated: isolated, current_leader: leader} = context) do
     followers_in_majority = List.delete(working, leader)
     all_members = working ++ killed ++ isolated
-    target =
-      if 2 * length(followers_in_majority) > length(all_members) do # can tolerate 1 member loss
-        Enum.random(followers_in_majority)
-      else
-        nil
-      end
-    if target do
+    if 2 * length(followers_in_majority) > length(all_members) do # can tolerate 1 member loss
+      target = Enum.random(followers_in_majority)
       assert RaftedValue.remove_follower(leader, target) == :ok
       assert_receive({:follower_removed, ^target}, @t_max_election_timeout)
-      assert_receive({:EXIT, ^target, :normal})
+      assert_receive({:EXIT, ^target, :normal}, @t_max_election_timeout)
       %{context | working: List.delete(working, target)}
     else
       context
@@ -696,7 +707,7 @@ defmodule RaftedValueTest do
     initial_members = [leader, follower1, follower2]
     context =
       %{working: initial_members, killed: [], isolated: [], current_leader: leader, leaders: %{}, term_numbers: %{}, commit_indices: %{}, leader_commit_index: 0, data: %{}}
-      |> assert_invariants
+      |> assert_invariants()
     client_pid = spawn_link(fn -> client_process_loop(initial_members, JustAnInt.new) end)
     {context, client_pid}
   end
@@ -704,7 +715,7 @@ defmodule RaftedValueTest do
   defp repeatedly_change_cluster_configuration(context, client_pid, n) do
     Enum.reduce(1 .. n, context, fn(_, c1) ->
       op = pick_operation(c1)
-      c2 = apply(__MODULE__, op, [c1]) |> assert_invariants
+      c2 = apply(__MODULE__, op, [c1]) |> assert_invariants()
       send(client_pid, {:members, c2.working})
       c2
     end)

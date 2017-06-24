@@ -8,7 +8,8 @@ defmodule RaftedValue.LogsMap do
 end
 
 defmodule RaftedValue.Logs do
-  alias RaftedValue.{LogIndex, LogEntry, LogInfo, LogsMap, FollowerIndices, TermNumber, PidSet, Members, Config}
+  alias RaftedValue.{LogIndex, LogEntry, LogInfo, LogsMap, FollowerIndices, TermNumber, PidSet, Members, Persistence}
+  alias RaftedValue.Persistence.SnapshotMetadata
   alias RaftedValue.RPC.AppendEntriesRequest
 
   use Croma.Struct, fields: [
@@ -33,8 +34,9 @@ defmodule RaftedValue.Logs do
     end)
   end
 
-  defun commit_to_latest(%__MODULE__{map: map, i_max: i_max, i_committed: i_c} = logs, config :: Config.t) :: {t, [LogEntry.t]} do
-    new_logs = %__MODULE__{logs | i_committed: i_max} |> truncate_old_logs(config)
+  defun commit_to_latest(%__MODULE__{map: map, i_max: i_max, i_committed: i_c} = logs,
+                         persistence :: nil | Persistence.t) :: {t, [LogEntry.t]} do
+    new_logs = %__MODULE__{logs | i_committed: i_max} |> truncate_old_logs(persistence)
     applicable_entries = slice_entries(map, i_c + 1, i_max)
     {new_logs, applicable_entries}
   end
@@ -74,11 +76,11 @@ defmodule RaftedValue.Logs do
                            current_term :: TermNumber.t,
                            follower_pid :: pid,
                            i_replicated :: LogIndex.t,
-                           config       :: Config.t) :: {t, [LogEntry.t]} do
+                           persistence  :: nil | Persistence.t) :: {t, [LogEntry.t]} do
     new_followers =
       Map.put(followers, follower_pid, {i_replicated + 1, i_replicated})
       |> Map.take(PidSet.delete(members_set, self()) |> PidSet.to_list) # in passing we remove outdated entries in `new_followers`
-    new_logs      = %__MODULE__{logs | followers: new_followers} |> update_commit_index(current_term, members_set, config)
+    new_logs      = %__MODULE__{logs | followers: new_followers} |> update_commit_index(current_term, members_set, persistence)
     applicable_entries = slice_entries(map, old_i_committed + 1, new_logs.i_committed)
     {new_logs, applicable_entries}
   end
@@ -86,7 +88,7 @@ defmodule RaftedValue.Logs do
   defunp update_commit_index(%__MODULE__{map: map, i_max: i_max, i_committed: i_c, followers: followers} = logs,
                              current_term :: TermNumber.t,
                              members_set  :: PidSet.t,
-                             config       :: Config.t) :: t do
+                             persistence  :: nil | Persistence.t) :: t do
     uncommitted_entries_reversed = slice_entries(map, i_c + 1, i_max) |> Enum.reverse
     last_commitable_entry_tuple =
       Stream.scan(uncommitted_entries_reversed, {nil, nil, members_set}, fn(entry, {_, _, members_for_this_entry}) ->
@@ -102,7 +104,7 @@ defmodule RaftedValue.Logs do
       end)
     case last_commitable_entry_tuple do
       nil           -> logs
-      {entry, _, _} -> %__MODULE__{logs | i_committed: elem(entry, 1)} |> truncate_old_logs(config)
+      {entry, _, _} -> %__MODULE__{logs | i_committed: elem(entry, 1)} |> truncate_old_logs(persistence)
     end
   end
 
@@ -137,41 +139,41 @@ defmodule RaftedValue.Logs do
   end
 
   defun add_entry(%__MODULE__{map: map, i_max: i_max} = logs,
-                  config :: Config.t,
-                  f      :: (LogIndex.t -> LogEntry.t)) :: {t, LogEntry.t} do
+                  persistence :: nil | Persistence.t,
+                  f           :: (LogIndex.t -> LogEntry.t)) :: {t, LogEntry.t} do
     i = i_max + 1
     entry = f.(i)
     new_logs =
       %__MODULE__{logs | map: Map.put(map, i, entry), i_max: i}
-      |> truncate_old_logs(config)
+      |> truncate_old_logs(persistence)
     {new_logs, entry}
   end
 
   defun add_entry_on_elected_leader(%__MODULE__{i_max: i_max} = logs,
-                                    members :: Members.t,
-                                    term    :: TermNumber.t,
-                                    config  :: Config.t) :: {t, LogEntry.t} do
+                                    members     :: Members.t,
+                                    term        :: TermNumber.t,
+                                    persistence :: nil | Persistence.t) :: {t, LogEntry.t} do
     follower_index_pair = {i_max + 1, 0}
     followers =
       Members.other_members_list(members)
       |> Map.new(fn follower -> {follower, follower_index_pair} end)
     %__MODULE__{logs | followers: followers}
-    |> add_entry(config, fn i -> {term, i, :leader_elected, self()} end)
+    |> add_entry(persistence, fn i -> {term, i, :leader_elected, self()} end)
   end
 
   defun add_entry_on_add_follower(%__MODULE__{i_max: i_max, followers: followers} = logs,
                                   term         :: TermNumber.t,
                                   new_follower :: pid,
-                                  config       :: Config.t) :: {t, LogEntry.t} do
+                                  persistence  :: nil | Persistence.t) :: {t, LogEntry.t} do
     %__MODULE__{logs | followers: Map.put(followers, new_follower, {i_max + 1, 0})}
-    |> add_entry(config, fn i -> {term, i, :add_follower, new_follower} end)
+    |> add_entry(persistence, fn i -> {term, i, :add_follower, new_follower} end)
   end
 
   defun add_entry_on_remove_follower(%__MODULE__{} = logs,
                                      term               :: TermNumber.t,
                                      follower_to_remove :: pid,
-                                     config             :: Config.t) :: {t, LogEntry.t} do
-    add_entry(logs, config, fn i -> {term, i, :remove_follower, follower_to_remove} end)
+                                     persistence        :: nil | Persistence.t) :: {t, LogEntry.t} do
+    add_entry(logs, persistence, fn i -> {term, i, :remove_follower, follower_to_remove} end)
   end
 
   #
@@ -192,11 +194,11 @@ defmodule RaftedValue.Logs do
                        %Members{all: members_set} = members,
                        entries         :: [LogEntry.t],
                        i_leader_commit :: LogIndex.t,
-                       config          :: Config.t) :: {t, Members.t, [LogEntry.t]} do
+                       persistence     :: nil | Persistence.t) :: {t, Members.t, [LogEntry.t]} do
     new_map         = Enum.into(entries, map, fn {_, index, _, _} = entry -> {index, entry} end)
     new_i_max       = if Enum.empty?(entries), do: i_max, else: max(i_max, elem(List.last(entries), 1))
     new_i_committed = max(old_i_committed, i_leader_commit)
-    new_logs        = %__MODULE__{logs | map: new_map, i_max: new_i_max, i_committed: new_i_committed} |> truncate_old_logs(config)
+    new_logs        = %__MODULE__{logs | map: new_map, i_max: new_i_max, i_committed: new_i_committed} |> truncate_old_logs(persistence)
     applicable_entries = slice_entries(new_map, old_i_committed + 1, new_i_committed)
 
     new_members_set = Enum.reduce(entries, members_set, &change_members/2)
@@ -255,8 +257,16 @@ defmodule RaftedValue.Logs do
   end
 
   defunp truncate_old_logs(%__MODULE__{map: map, i_min: i_min, i_committed: i_c} = logs,
-                           %Config{max_retained_committed_logs: max_logs}) :: t do
-    case i_c - max_logs + 1 do
+                           persistence_or_nil :: nil | Persistence.t) :: t do
+    index_removable_upto =
+      case persistence_or_nil do
+        %Persistence{latest_snapshot_metadata: %SnapshotMetadata{last_committed_index: i}} -> i
+        _ -> i_c
+      end
+    # We don't use `followers` field to compute threshold index to discard; use fixed value (`100`) to keep extra log entries instead,
+    # because `followers` field is available only to leader processes.
+    # If a follower lags too behind then leader gives up log shipping and sends a snapshot, so it's OK.
+    case index_removable_upto - 99 do
       new_i_min when new_i_min > i_min -> %__MODULE__{logs | map: Map.drop(map, i_min .. new_i_min - 1), i_min: new_i_min}
       _                                -> logs
     end

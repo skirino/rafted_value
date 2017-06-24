@@ -87,7 +87,6 @@ defmodule RaftedValue.Persistence do
     :ok = :gen_fsm.sync_send_all_state_event(server_pid, message, :infinity)
 
     # cleanup obsolete snapshots and logs
-    :timer.sleep(1000)
     Path.wildcard(Path.join(dir, "snapshot_*"))
     |> Enum.filter(fn path -> Path.basename(path) != snapshot_basename end)
     |> Enum.each(&File.rm!/1)

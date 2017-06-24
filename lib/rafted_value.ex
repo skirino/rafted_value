@@ -66,7 +66,6 @@ defmodule RaftedValue do
     During the lease time the leader can assume that no other members are ever elected leader.
     This enables the leader to skip message round trips during processing read-only query.
     Defaults to the value of `election_timeout` (i.e. no lease time, disabling this clock-based optimization).
-  - `max_retained_committed_logs`: Number of committed log entries to keep in each member. Defaults to `100`.
   - `max_retained_command_results`: Number of command results to be cached,
     in order to prevent doubly applying the same command. Defaults to `100`.
   """
@@ -79,7 +78,7 @@ defmodule RaftedValue do
       heartbeat_timeout:                   Keyword.get(opts, :heartbeat_timeout                  , 200),
       election_timeout:                    election_timeout,
       election_timeout_clock_drift_margin: Keyword.get(opts, :election_timeout_clock_drift_margin, election_timeout),
-      max_retained_committed_logs:         Keyword.get(opts, :max_retained_committed_logs        , 100),
+      max_retained_committed_logs:         100,
       max_retained_command_results:        Keyword.get(opts, :max_retained_command_results       , 100),
     } |> Config.validate!
   end

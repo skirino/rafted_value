@@ -131,11 +131,10 @@ defmodule RaftedValue.Server do
             # On the other hand we discard `members` obtained from disk, as `self()` is the sole member of this newly-spawned consensus group.
             members                     = Members.new_for_lonely_leader()
             snapshot                    = %Snapshot{snapshot_from_disk | members: members}
-            config                      = snapshot.config
             logs1                       = Logs.new_for_lonely_leader(snapshot.last_committed_entry, log_entries)
-            {logs2, entry_elected}      = Logs.add_entry_on_elected_leader(logs1, members, snapshot.term, config)
-            {logs3, applicable_entries} = Logs.commit_to_latest(logs2, config)
+            {logs2, entry_elected}      = Logs.add_entry_on_elected_leader(logs1, members, snapshot.term, nil)
             persistence                 = Persistence.new_with_disk_snapshot(dir, snapshot_meta, entry_elected)
+            {logs3, applicable_entries} = Logs.commit_to_latest(logs2, persistence)
             state                       = build_state_from_snapshot(snapshot, logs3, persistence)
             Enum.reduce(applicable_entries, state, &leader_apply_committed_log_entry_without_membership_change/2) # `entry_elected` results in a no-op and thus neglected
         end
@@ -210,11 +209,11 @@ defmodule RaftedValue.Server do
   # leader state
   #
   def leader(%AppendEntriesResponse{from: from, success: success, i_replicated: i_replicated, leader_timestamp: leader_timestamp} = rpc,
-             %State{members: members, current_term: current_term, leadership: leadership, logs: logs, config: config} = state) do
+             %State{members: members, current_term: current_term, leadership: leadership, logs: logs, config: config, persistence: persistence} = state) do
     become_follower_if_new_term_started(rpc, state, fn ->
       new_leadership = Leadership.follower_responded(leadership, members, from, leader_timestamp, config)
       if success do
-        {new_logs, applicable_entries} = Logs.set_follower_index(logs, members, current_term, from, i_replicated, config)
+        {new_logs, applicable_entries} = Logs.set_follower_index(logs, members, current_term, from, i_replicated, persistence)
         new_state1 = %State{state | leadership: new_leadership, logs: new_logs}
         new_state2 = Enum.reduce(applicable_entries, new_state1, &leader_apply_committed_log_entry/2)
         case members do
@@ -259,17 +258,17 @@ defmodule RaftedValue.Server do
     same_fsm_state(state) # leader neglects `:election_timeout`, `:remove_follower_completed`, `InstallSnapshot`, `TimeoutNow`
   end
 
-  def leader({:command, arg, cmd_id}, from, %State{current_term: term, logs: logs, config: config} = state) do
-    {new_logs, entry} = Logs.add_entry(logs, config, fn index -> {term, index, :command, {from, arg, cmd_id}} end)
+  def leader({:command, arg, cmd_id}, from, %State{current_term: term, logs: logs, persistence: persistence} = state) do
+    {new_logs, entry} = Logs.add_entry(logs, persistence, fn index -> {term, index, :command, {from, arg, cmd_id}} end)
     %State{state | logs: new_logs}
     |> persist_log_entries([entry])
-    |> broadcast_append_entries
-    |> same_fsm_state
+    |> broadcast_append_entries()
+    |> same_fsm_state()
   end
-  def leader({:query, arg}, from, %State{members: members, current_term: term, leadership: leadership, logs: logs, config: config} = state) do
+  def leader({:query, arg}, from, %State{members: members, current_term: term, leadership: leadership, logs: logs, config: config, persistence: persistence} = state) do
     if Leadership.lease_expired?(leadership, members, config) do
       # if leader's lease has already expired, fall back to log replication (handled in the same way as commands)
-      {new_logs, entry} = Logs.add_entry(logs, config, fn index -> {term, index, :query, {from, arg}} end)
+      {new_logs, entry} = Logs.add_entry(logs, persistence, fn index -> {term, index, :query, {from, arg}} end)
       %State{state | logs: new_logs}
       |> persist_log_entries([entry])
       |> broadcast_append_entries()
@@ -282,8 +281,8 @@ defmodule RaftedValue.Server do
   end
   def leader({:change_config, new_config},
              _from,
-             %State{current_term: term, logs: logs, config: config} = state) do
-    {new_logs, entry} = Logs.add_entry(logs, config, fn index -> {term, index, :change_config, new_config} end)
+             %State{current_term: term, logs: logs, persistence: persistence} = state) do
+    {new_logs, entry} = Logs.add_entry(logs, persistence, fn index -> {term, index, :change_config, new_config} end)
     %State{state | logs: new_logs}
     |> persist_log_entries([entry])
     |> same_fsm_state_reply(:ok)
@@ -291,8 +290,8 @@ defmodule RaftedValue.Server do
 
   def leader({:add_follower, new_follower},
              from,
-             %State{members: members, current_term: term, logs: logs, config: config} = state) do
-    {new_logs, add_follower_entry} = Logs.add_entry_on_add_follower(logs, term, new_follower, config)
+             %State{members: members, current_term: term, logs: logs, persistence: persistence} = state) do
+    {new_logs, add_follower_entry} = Logs.add_entry_on_add_follower(logs, term, new_follower, persistence)
     case Members.start_adding_follower(members, add_follower_entry) do
       {:error, _} = e ->
         # we have to revert to the `state` without `add_follower_entry`
@@ -305,8 +304,8 @@ defmodule RaftedValue.Server do
   end
   def leader({:remove_follower, old_follower},
              _from,
-             %State{members: members, current_term: term, leadership: leadership, logs: logs, config: config} = state) do
-    {new_logs, remove_follower_entry} = Logs.add_entry_on_remove_follower(logs, term, old_follower, config)
+             %State{members: members, current_term: term, leadership: leadership, logs: logs, config: config, persistence: persistence} = state) do
+    {new_logs, remove_follower_entry} = Logs.add_entry_on_remove_follower(logs, term, old_follower, persistence)
     case Members.start_removing_follower(members, remove_follower_entry) do
       {:error, _} = e ->
         # we have to revert to the `state` without `remove_follower_entry`
@@ -339,21 +338,21 @@ defmodule RaftedValue.Server do
     end
   end
 
-  def become_leader(%State{members: members, current_term: term, logs: logs, config: config} = state) do
+  def become_leader(%State{members: members, current_term: term, logs: logs, config: config, persistence: persistence} = state) do
     leadership = Leadership.new_for_leader(config)
-    {new_logs, entry} = Logs.add_entry_on_elected_leader(logs, members, term, config)
+    {new_logs, entry} = Logs.add_entry_on_elected_leader(logs, members, term, persistence)
     %State{state | members: Members.put_leader(members, self()), leadership: leadership, logs: new_logs}
     |> persist_log_entries([entry])
     |> broadcast_append_entries()
     |> next_state(:leader)
   end
 
-  defunp broadcast_append_entries(%State{members: members, leadership: leadership, logs: logs, config: config} = state) :: State.t do
+  defunp broadcast_append_entries(%State{members: members, leadership: leadership, logs: logs, config: config, persistence: persistence} = state) :: State.t do
     followers = Members.other_members_list(members)
     if Enum.empty?(followers) do
       # When there's no other member in this consensus group, the leader won't receive AppendEntriesResponse;
       # here is the time to make decisions (solely by itself) by committing new entries.
-      {new_logs, applicable_entries} = Logs.commit_to_latest(logs, config)
+      {new_logs, applicable_entries} = Logs.commit_to_latest(logs, persistence)
       new_leadership = Leadership.reset_quorum_timer(leadership, config) # quorum is reached by the leader itself
       new_state = %State{state | leadership: new_leadership, logs: new_logs}
       Enum.reduce(applicable_entries, new_state, &leader_apply_committed_log_entry/2)
@@ -472,11 +471,11 @@ defmodule RaftedValue.Server do
     become_candidate_and_start_new_election(state)
   end
   def follower(%TimeoutNow{append_entries_req: req},
-               %State{members: members, current_term: current_term, logs: logs, config: config} = state) do
+               %State{members: members, current_term: current_term, logs: logs, persistence: persistence} = state) do
     %AppendEntriesRequest{term: term, prev_log: prev_log, entries: entries, i_leader_commit: i_leader_commit} = req
     if term == current_term and Logs.contain_given_prev_log?(logs, prev_log) do
       # catch up with the leader and then start election
-      {new_logs, new_members1, applicable_entries} = Logs.append_entries(logs, members, entries, i_leader_commit, config)
+      {new_logs, new_members1, applicable_entries} = Logs.append_entries(logs, members, entries, i_leader_commit, persistence)
       new_state1 = %State{state | members: new_members1, logs: new_logs} |> persist_log_entries(entries)
       new_state2 = Enum.reduce(applicable_entries, new_state1, &nonleader_apply_committed_log_entry/2)
       become_candidate_and_start_new_election(new_state2, true)
@@ -532,7 +531,7 @@ defmodule RaftedValue.Server do
   #
   defp handle_append_entries_request(%AppendEntriesRequest{term: term, leader_pid: leader_pid, prev_log: prev_log,
                                                            entries: entries, i_leader_commit: i_leader_commit, leader_timestamp: leader_timestamp},
-                                     %State{members: members, current_term: current_term, logs: logs, config: config} = state,
+                                     %State{members: members, current_term: current_term, logs: logs, persistence: persistence} = state,
                                      current_state_name) do
     reply_as_failure = fn larger_term ->
       send_event(state, leader_pid, %AppendEntriesResponse{from: self(), term: larger_term, success: false, leader_timestamp: leader_timestamp})
@@ -544,7 +543,7 @@ defmodule RaftedValue.Server do
       next_state(state, current_state_name)
     else
       if Logs.contain_given_prev_log?(logs, prev_log) do
-        {new_logs, new_members1, applicable_entries} = Logs.append_entries(logs, members, entries, i_leader_commit, config)
+        {new_logs, new_members1, applicable_entries} = Logs.append_entries(logs, members, entries, i_leader_commit, persistence)
         new_members2 = Members.put_leader(new_members1, leader_pid)
         new_state1 = %State{state | members: new_members2, current_term: term, logs: new_logs} |> persist_log_entries(entries)
         new_state2 = Enum.reduce(applicable_entries, new_state1, &nonleader_apply_committed_log_entry/2)
