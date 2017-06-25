@@ -40,7 +40,7 @@ defmodule RaftedValue.Leadership do
                            follower  :: pid,
                            timestamp :: Monotonic.t,
                            config    :: Config.t) :: t do
-    follower_pids = PidSet.delete(all, self()) |> PidSet.to_list
+    follower_pids = PidSet.delete(all, self()) |> PidSet.to_list()
     new_times =
       Map.update(times, follower, timestamp, &max(&1, timestamp))
       |> Map.take(follower_pids) # filter by the actual members, in order not to be disturbed by message from already-removed member
@@ -91,13 +91,18 @@ defmodule RaftedValue.Leadership do
     %__MODULE__{leadership | follower_responded_times: Map.delete(times, follower)}
   end
 
-  defun lease_expired?(leadership :: t,
-                       members    :: Members.t,
+  defun lease_expired?(%__MODULE__{follower_responded_times: times},
+                       %Members{all: all},
                        %Config{election_timeout: timeout,
                                election_timeout_clock_drift_margin: margin}) :: boolean do
-    case quorum_last_reached_at(leadership, members) do
-      nil        -> true
-      reached_at -> reached_at + timeout - margin <= Monotonic.millis()
+    n = PidSet.size(all)
+    if n <= 1 do
+      false # 1-member consensus group, leader can make decision by itself
+    else
+      case quorum_last_reached_at_impl(times, n) do
+        nil        -> true
+        reached_at -> reached_at + timeout - margin <= Monotonic.millis()
+      end
     end
   end
 
@@ -106,12 +111,16 @@ defmodule RaftedValue.Leadership do
     if n <= 1 do
       nil
     else
-      n_half_followers = div(n - 1, 2)
-      Map.values(times)
-      |> Enum.sort
-      |> Enum.drop(n_half_followers)
-      |> List.first # can return `nil` if `follwer_responded_times` doesn't contain enough items (i.e. right after a leader is elected)
+      quorum_last_reached_at_impl(times, n)
     end
+  end
+
+  defunp quorum_last_reached_at_impl(times :: %{pid => Monotonic.t}, n_members :: pos_integer) :: nil | Monotonic.t do
+    n_half_followers = div(n_members - 1, 2)
+    Map.values(times)
+    |> Enum.sort()
+    |> Enum.drop(n_half_followers)
+    |> List.first() # can return `nil` if `follwer_responded_times` doesn't contain enough items (i.e. right after a leader is elected)
   end
 
   defunp max_election_timeout(%Config{election_timeout: t}) :: pos_integer do

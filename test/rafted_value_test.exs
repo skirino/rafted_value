@@ -442,6 +442,14 @@ defmodule RaftedValueTest do
     assert RaftedValue.query(leader, :get, 100) == {:error, :timeout} # cannot confirm whether the leader's value is still the latest
   end
 
+  test "lonely leader should reply query without making log entry" do
+    {:ok, l} = RaftedValue.start_link({:create_new_consensus_group, @conf})
+    {:leader, state1} = :sys.get_state(l)
+    assert RaftedValue.query(l, :get) == {:ok, 0}
+    {:leader, state2} = :sys.get_state(l)
+    assert state2.logs == state1.logs
+  end
+
   #
   # property-based tests
   #
@@ -501,7 +509,6 @@ defmodule RaftedValueTest do
   end
 
   defp assert_invariants(%{working: working, isolated: isolated} = context) do
-    :timer.sleep(100)
     members_alive = working ++ isolated
     member_state_pairs = Enum.map(members_alive, fn m -> {m, :sys.get_state(m)} end)
     new_context =
@@ -620,7 +627,7 @@ defmodule RaftedValueTest do
       (if n_killed > 0, do: :op_purge_killed_member),
     ]
     |> Enum.reject(&is_nil/1)
-    |> Enum.random
+    |> Enum.random()
   end
 
   def op_replace_leader(%{working: working, current_leader: leader} = context) do

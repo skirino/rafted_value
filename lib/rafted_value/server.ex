@@ -434,7 +434,7 @@ defmodule RaftedValue.Server do
       # As `self` already has vote from majority (i.e. itself), no election is needed;
       # skip candidate state and directly become a leader.
       %State{state | current_term: term + 1, election: Election.new_for_leader}
-      |> become_leader
+      |> become_leader()
     else
       new_members  = Members.put_leader(members, nil)
       new_election = Election.update_for_candidate(election, config)
