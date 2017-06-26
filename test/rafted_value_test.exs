@@ -640,7 +640,14 @@ defmodule RaftedValueTest do
 
   def op_add_follower(context) do
     leader = context.current_leader
-    new_follower = add_follower(leader)
+    persistence_dir =
+      case context.persistence_base_dir do
+        nil -> nil
+        dir ->
+          random = :crypto.strong_rand_bytes(10) |> Base.encode16()
+          Path.join(dir, random)
+      end
+    new_follower = add_follower(leader, nil, persistence_dir)
     assert_receive({:follower_added, _pid}, @t_max_election_timeout)
     %{context | working: [new_follower | context.working]}
   end
@@ -710,10 +717,11 @@ defmodule RaftedValueTest do
     {leader, [follower1, follower2]} = make_cluster(2, config, persist?)
     assert_receive({:follower_added, ^follower1})
     assert_receive({:follower_added, ^follower2})
+    persistence_base_dir = if persist?, do: @tmp_dir, else: nil
 
     initial_members = [leader, follower1, follower2]
     context =
-      %{working: initial_members, killed: [], isolated: [], current_leader: leader, leaders: %{}, term_numbers: %{}, commit_indices: %{}, leader_commit_index: 0, data: %{}}
+      %{working: initial_members, killed: [], isolated: [], current_leader: leader, leaders: %{}, term_numbers: %{}, commit_indices: %{}, leader_commit_index: 0, data: %{}, persistence_base_dir: persistence_base_dir}
       |> assert_invariants()
     client_pid = spawn_link(fn -> client_process_loop(initial_members, JustAnInt.new) end)
     {context, client_pid}
@@ -794,6 +802,13 @@ defmodule RaftedValueTest do
     end
   end
 
+  defp assert_leader_status(leader, members, isolated) do
+    s = RaftedValue.status(leader)
+    assert s.state_name == :leader
+    assert_equal_as_set(s.members, members)
+    assert_equal_as_set(s.unresponsive_followers, isolated)
+  end
+
   defp run_consensus_group_and_check_responsiveness_with_non_critical_netsplit(persist?) do
     CommunicationWithNetsplit.start()
     config =
@@ -809,27 +824,33 @@ defmodule RaftedValueTest do
 
         # cause netsplit
         n_isolated = :rand.uniform(div(length(c1.working) - 1, 2))
-        isolated = Enum.take_random(c1.working, n_isolated)
+        isolated0 = Enum.take_random(c1.working -- [c1.current_leader], n_isolated - 1)
+        isolated = [c1.current_leader | isolated0]
         working_after_split  = c1.working -- isolated
         send(client_pid, {:members, working_after_split})
         CommunicationWithNetsplit.set(isolated)
         leader_after_netsplit =
           if c1.current_leader in isolated do
-            receive_leader_elected_message() || receive_leader_elected_message() || raise "no leader!!!"
+            # although Raft election can take arbitrarily long, trying twice is reasonably successful here
+            receive_leader_elected_message() || receive_leader_elected_message() || raise "no leader elected after netsplit!"
           else
             c1.current_leader
           end
         c2 = %{c1 | working: working_after_split, isolated: isolated, current_leader: leader_after_netsplit}
+        :timer.sleep(100)
+        assert_leader_status(leader_after_netsplit, c1.working, isolated)
 
         c3 = repeatedly_change_cluster_configuration(c2, client_pid, 5)
 
         # cleanup: recover from netsplit, find new leader, purge killed
+        CommunicationWithNetsplit.set([])
         working_after_heal = c3.working ++ c3.isolated
         send(client_pid, {:members, working_after_heal})
-        CommunicationWithNetsplit.set([])
         leader_after_heal = receive_leader_elected_message() || c3.current_leader
         c4 = %{c3 | working: working_after_heal, isolated: [], current_leader: leader_after_heal}
-        Enum.reduce(c4.killed, c4, fn(_, c) -> op_purge_killed_member(c) end)
+        c5 = Enum.reduce(c4.killed, c4, fn(_, c) -> op_purge_killed_member(c) end)
+        assert_leader_status(leader_after_heal, c5.working, [])
+        c5
       end)
 
     finish_client_process(client_pid)

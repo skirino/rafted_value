@@ -225,7 +225,7 @@ defmodule RaftedValue.Server do
                 send_event(new_state2, from, req)
                 convert_state_as_follower(new_state2, current_term) |> next_state(:follower) # step down in order not to serve client requests any more
               {:too_old, _} ->
-                # `from`'s logs lags too behind => try next time
+                # `from`'s logs lag too behind => try next time
                 same_fsm_state(new_state2)
             end
           _ -> same_fsm_state(new_state2)
@@ -362,7 +362,7 @@ defmodule RaftedValue.Server do
         send_append_entries(s, follower, now)
       end)
     end
-    |> reset_heartbeat_timer
+    |> reset_heartbeat_timer()
   end
 
   defunp send_append_entries(%State{current_term: term, logs: logs} = state, follower :: pid, now :: Monotonic.t) :: State.t do
@@ -431,9 +431,9 @@ defmodule RaftedValue.Server do
                                                replacing_leader? \\ false) do
     if PidSet.size(members.all) == 1 do
       # 1-member consensus group must be handled separately.
-      # As `self` already has vote from majority (i.e. itself), no election is needed;
+      # As `self()` already has vote from majority (i.e. itself), no election is needed;
       # skip candidate state and directly become a leader.
-      %State{state | current_term: term + 1, election: Election.new_for_leader}
+      %State{state | current_term: term + 1, election: Election.new_for_leader()}
       |> become_leader()
     else
       new_members  = Members.put_leader(members, nil)
