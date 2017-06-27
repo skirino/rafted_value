@@ -214,7 +214,7 @@ defmodule RaftedValue.Logs do
     new_members_set = Enum.reduce(entries, members_set, &change_members/2)
     last_member_change_entry =
       slice_entries(new_map, i_max + 1, new_i_max)
-      |> Enum.reverse
+      |> Enum.reverse()
       |> Enum.find(fn {_, _, atom, _} -> atom in [:add_follower, :remove_follower] end)
     new_members =
       if last_member_change_entry do
@@ -235,11 +235,11 @@ defmodule RaftedValue.Logs do
   # utilities
   #
   defun last_entry(%__MODULE__{map: m, i_max: i_max}) :: LogEntry.t do
-    m[i_max]
+    Map.fetch!(m, i_max)
   end
 
   defun last_committed_entry(%__MODULE__{map: m, i_committed: i_c}) :: LogEntry.t do
-    m[i_c]
+    Map.fetch!(m, i_c)
   end
 
   defunp change_members(entry :: LogEntry.t, members :: PidSet.t) :: PidSet.t do

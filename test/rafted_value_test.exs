@@ -29,7 +29,7 @@ defmodule RaftedValueTest do
     :timer.sleep(20)
     {:leader, state} = :sys.get_state(leader)
     members = state.members
-    if members.uncommitted_membership_change && members.pending_leader_change do
+    if members.uncommitted_membership_change || members.pending_leader_change do
       wait_until_member_change_completes(leader)
     else
       :ok
@@ -429,7 +429,6 @@ defmodule RaftedValueTest do
       |> Map.put(:heartbeat_timeout, 80)
     {:ok, leader} = RaftedValue.start_link({:create_new_consensus_group, config})
     follower1 = add_follower(leader)
-    :timer.sleep(80)
     follower2 = add_follower(leader)
 
     # Lease time should be calculated from the time AppendEntriesRequest messages are broadcasted from leader to follwers.
@@ -601,7 +600,7 @@ defmodule RaftedValueTest do
     case get_in(context, keys) do
       nil -> put_in(context, keys, value)
       v   ->
-        assert value == v
+        assert v == value, "#{inspect(keys)} in context has unexpected value #{inspect(v)} (expected: #{inspect(value)})"
         context
     end
   end
@@ -737,7 +736,6 @@ defmodule RaftedValueTest do
   end
 
   defp finish_client_process(client_pid) do
-    :timer.sleep(100)
     refute_received({:EXIT, ^client_pid, _})
     send(client_pid, :finish)
     assert_receive({:EXIT, ^client_pid, :normal}, 1000)
@@ -831,8 +829,8 @@ defmodule RaftedValueTest do
         CommunicationWithNetsplit.set(isolated)
         leader_after_netsplit =
           if c1.current_leader in isolated do
-            # although Raft election can take arbitrarily long, trying twice is reasonably successful here
-            receive_leader_elected_message() || receive_leader_elected_message() || raise "no leader elected after netsplit!"
+            # although Raft election can take arbitrarily long, trying 3 times is reasonably successful here
+            receive_leader_elected_message() || receive_leader_elected_message() || receive_leader_elected_message() || raise "no leader elected after netsplit!"
           else
             c1.current_leader
           end

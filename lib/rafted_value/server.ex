@@ -180,7 +180,7 @@ defmodule RaftedValue.Server do
     persistence =
       case persistence_dir_or_nil do
         nil -> nil
-        dir -> Persistence.new_with_initial_snapshotting(dir, snapshot)
+        dir -> Persistence.new_with_snapshot_sent_from_leader(dir, snapshot)
       end
     %State{members: members, current_term: term, election: election, logs: logs, data: data, command_results: command_results, config: config, persistence: persistence}
   end
@@ -551,8 +551,8 @@ defmodule RaftedValue.Server do
       if Logs.contain_given_prev_log?(logs, prev_log) do
         {new_logs, new_members1, applicable_entries} = Logs.append_entries(logs, members, entries, i_leader_commit, persistence)
         new_members2 = Members.put_leader(new_members1, leader_pid)
-        new_state1 = %State{state | members: new_members2, current_term: term, logs: new_logs} |> persist_log_entries(entries)
-        new_state2 = Enum.reduce(applicable_entries, new_state1, &nonleader_apply_committed_log_entry/2)
+        new_state1 = %State{state | members: new_members2, current_term: term, logs: new_logs}
+        new_state2 = Enum.reduce(applicable_entries, new_state1, &nonleader_apply_committed_log_entry/2) |> persist_log_entries(entries)
         reply = %AppendEntriesResponse{from: self(), term: term, success: true, i_replicated: new_logs.i_max, leader_timestamp: leader_timestamp}
         send_event(new_state2, leader_pid, reply)
         new_state2
@@ -784,7 +784,8 @@ defmodule RaftedValue.Server do
                               persistence: persistence} = state,
                        follower :: pid,
                        send_fun :: ((module, InstallSnapshot.t | InstallSnapshotCompressed.t) -> :ok)) :: State.t do
-    # Avoid copying the entire `state` to minimize amount of data transfer to temporary process
+    # Assuming that `state` reflects all committed log entries.
+    # Note that we avoid copying the entire `state` in order to minimize amount of data transfer to temporary process.
     case persistence do
       %Persistence{latest_snapshot_metadata: %Persistence.SnapshotMetadata{path: path} = meta} ->
         spawn(fn ->

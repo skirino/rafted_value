@@ -34,6 +34,13 @@ defmodule RaftedValue.Persistence do
     |> write_log_entries([entry_elected])
   end
 
+  defun new_with_snapshot_sent_from_leader(dir :: Path.t, snapshot :: Snapshot.t) :: t do
+    File.mkdir_p!(dir)
+    {_, index_snapshot, _, _} = snapshot.last_committed_entry
+    %__MODULE__{dir: dir, log_size_written: 0, log_expansion_factor: 4.0} # `log_fd` will be filled soon
+    |> switch_log_file_and_spawn_snapshot_writer(snapshot, index_snapshot + 1)
+  end
+
   defun write_log_entries(%__MODULE__{log_fd: fd, log_size_written: size} = p, entries :: [LogEntry.t]) :: t do
     bin = Enum.map(entries, &LogEntry.to_binary/1) |> :erlang.iolist_to_binary()
     :ok = :file.write(fd, bin)
