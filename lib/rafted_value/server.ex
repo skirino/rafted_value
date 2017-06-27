@@ -190,7 +190,7 @@ defmodule RaftedValue.Server do
     [m | ms] ->
       case call_add_server_one(m) do
         {:ok, %InstallSnapshot{} = is}              -> Map.put(is, :__struct__, Snapshot)
-        {:ok, %InstallSnapshotCompressed{bin: bin}} -> :zlib.gunzip(bin) |> :erlang.binary_to_term()
+        {:ok, %InstallSnapshotCompressed{bin: bin}} -> Snapshot.decode(bin)
         {:error, {:not_leader, nil}}                -> call_add_server(ms)
         {:error, {:not_leader, leader}}             -> call_add_server([leader | List.delete(ms, leader)])
         {:error, :noproc}                           -> call_add_server(ms)
@@ -494,7 +494,7 @@ defmodule RaftedValue.Server do
     end)
   end
   def follower(%InstallSnapshotCompressed{bin: bin}, state) do
-    %Snapshot{members: members, term: term, last_committed_entry: last_entry, data: data, command_results: command_results} = snapshot = :zlib.gunzip(bin) |> :erlang.binary_to_term()
+    %Snapshot{members: members, term: term, last_committed_entry: last_entry, data: data, command_results: command_results} = snapshot = Snapshot.decode(bin)
     become_follower_if_new_term_started(snapshot, state, fn ->
       logs = Logs.new_for_new_follower(last_entry)
       %State{state | members: members, current_term: term, logs: logs, data: data, command_results: command_results}

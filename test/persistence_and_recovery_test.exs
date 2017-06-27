@@ -49,7 +49,7 @@ defmodule RaftedValue.PersistenceAndRecoveryTest do
   end
 
   defp read_snapshot(path) do
-    File.read!(path) |> :zlib.gunzip() |> :erlang.binary_to_term()
+    File.read!(path) |> Snapshot.decode()
   end
 
   defp snapshot_path_to_committed_index(path) do

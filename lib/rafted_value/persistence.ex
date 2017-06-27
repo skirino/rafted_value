@@ -79,7 +79,7 @@ defmodule RaftedValue.Persistence do
                       server_pid) do
     snapshot_basename = "snapshot_#{term}_#{last_committed_index}"
     snapshot_path     = Path.join(dir, snapshot_basename)
-    compressed        = :erlang.term_to_binary(snapshot) |> :zlib.gzip()
+    compressed        = Snapshot.encode(snapshot)
     File.write!(snapshot_path, compressed)
 
     # notify the gen_fsm process (we have to wait for reply in order to ensure that older snapshots won't be used anymore)

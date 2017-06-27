@@ -17,7 +17,7 @@ defmodule RaftedValue.Snapshot do
     case find_snapshot_and_log_files(dir) do
       nil                              -> nil
       {snapshot_path, meta, log_paths} ->
-        snapshot = File.read!(snapshot_path) |> :zlib.gunzip() |> :erlang.binary_to_term()
+        snapshot = File.read!(snapshot_path) |> decode()
         {_, last_committed_index, _, _} = snapshot.last_committed_entry
         log_stream =
           Stream.flat_map(log_paths, &LogEntry.read_as_stream/1)
@@ -37,5 +37,13 @@ defmodule RaftedValue.Snapshot do
         log_paths = Persistence.find_log_files_containing_uncommitted_entries(dir, last_committed_index)
         {snapshot_path, meta, log_paths}
     end
+  end
+
+  defun encode(snapshot :: Snapshot.t) :: binary do
+    :erlang.term_to_binary(snapshot) |> :zlib.gzip()
+  end
+
+  defun decode(bin :: binary) :: Snapshot.t do
+    :zlib.gunzip(bin) |> :erlang.binary_to_term()
   end
 end
