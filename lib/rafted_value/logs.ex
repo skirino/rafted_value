@@ -71,6 +71,16 @@ defmodule RaftedValue.Logs do
     end
   end
 
+  defun set_follower_index_as_snapshot_last_index(%__MODULE__{followers: followers} = logs,
+                                                  %Members{all: members_set},
+                                                  follower_pid :: pid,
+                                                  %SnapshotMetadata{last_committed_index: index}) :: t do
+    new_followers =
+      Map.put(followers, follower_pid, {index + 1, index})
+      |> Map.take(PidSet.delete(members_set, self()) |> PidSet.to_list()) # in passing we remove outdated entries in `new_followers`
+    %__MODULE__{logs | followers: new_followers}
+  end
+
   defun set_follower_index(%__MODULE__{map: map, i_committed: old_i_committed, followers: followers} = logs,
                            %Members{all: members_set},
                            current_term :: TermNumber.t,
@@ -80,7 +90,7 @@ defmodule RaftedValue.Logs do
     new_followers =
       Map.put(followers, follower_pid, {i_replicated + 1, i_replicated})
       |> Map.take(PidSet.delete(members_set, self()) |> PidSet.to_list()) # in passing we remove outdated entries in `new_followers`
-    new_logs      = %__MODULE__{logs | followers: new_followers} |> update_commit_index(current_term, members_set, persistence)
+    new_logs = %__MODULE__{logs | followers: new_followers} |> update_commit_index(current_term, members_set, persistence)
     applicable_entries = slice_entries(map, old_i_committed + 1, new_logs.i_committed)
     {new_logs, applicable_entries}
   end

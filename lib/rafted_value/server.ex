@@ -12,7 +12,7 @@ defmodule RaftedValue.Server do
   #     - AppendEntriesResponse
   #     - RequestVoteRequest
   #     - RequestVoteResponse
-  #     - InstallSnapshot
+  #     - InstallSnapshot, InstallSnapshotCompressed
   #     - TimeoutNow
   #   - others
   #     - :heartbeat_timeout
@@ -65,6 +65,7 @@ defmodule RaftedValue.Server do
     RequestVoteRequest,
     RequestVoteResponse,
     InstallSnapshot,
+    InstallSnapshotCompressed,
     TimeoutNow,
   }
 
@@ -188,11 +189,11 @@ defmodule RaftedValue.Server do
     []       -> raise "no leader found"
     [m | ms] ->
       case call_add_server_one(m) do
-        {:ok, %Snapshot{} = snapshot}   -> snapshot
-        {:ok, %InstallSnapshot{} = is}  -> Map.put(is, :__struct__, Snapshot) # convert message from older version of RaftedValue leader
-        {:error, {:not_leader, nil}}    -> call_add_server(ms)
-        {:error, {:not_leader, leader}} -> call_add_server([leader | List.delete(ms, leader)])
-        {:error, :noproc}               -> call_add_server(ms)
+        {:ok, %InstallSnapshot{} = is}              -> Map.put(is, :__struct__, Snapshot)
+        {:ok, %InstallSnapshotCompressed{bin: bin}} -> :zlib.gunzip(bin) |> :erlang.binary_to_term()
+        {:error, {:not_leader, nil}}                -> call_add_server(ms)
+        {:error, {:not_leader, leader}}             -> call_add_server([leader | List.delete(ms, leader)])
+        {:error, :noproc}                           -> call_add_server(ms)
         # {:error, :uncommitted_membership_change} results in an error
       end
   end
@@ -297,9 +298,11 @@ defmodule RaftedValue.Server do
         # we have to revert to the `state` without `add_follower_entry`
         same_fsm_state_reply(state, e)
       {:ok, new_members} ->
-        new_state = %State{state | members: new_members, logs: new_logs} |> persist_log_entries([add_follower_entry])
-        reply(state, from, {:ok, make_install_snapshot(state)})
-        broadcast_append_entries(new_state) |> same_fsm_state()
+        %State{state | members: new_members, logs: new_logs}
+        |> persist_log_entries([add_follower_entry])
+        |> send_snapshot(new_follower, fn(mod, snapshot) -> mod.reply(from, {:ok, snapshot}) end)
+        |> broadcast_append_entries()
+        |> same_fsm_state()
     end
   end
   def leader({:remove_follower, old_follower},
@@ -371,18 +374,12 @@ defmodule RaftedValue.Server do
         send_event(state, follower, req)
         state
       {:too_old, new_logs} ->
-        new_state = %State{state | logs: new_logs} # reset follower's next index
-        send_event(new_state, follower, make_install_snapshot(new_state))
-        new_state
+        %State{state | logs: new_logs}
+        |> send_snapshot(follower, fn(mod, snapshot) -> mod.send_event(follower, snapshot) end)
       :error ->
         # `follower` is not included in `logs`; this indicates that `follower` is already removed => neglect
         state
     end
-  end
-
-  defunp make_install_snapshot(%State{members: members, current_term: term, logs: logs, data: data, command_results: command_results, config: config}) :: InstallSnapshot.t do
-    last_entry = Logs.last_committed_entry(logs)
-    %InstallSnapshot{members: members, term: term, last_committed_entry: last_entry, data: data, command_results: command_results, config: config}
   end
 
   #
@@ -490,6 +487,15 @@ defmodule RaftedValue.Server do
   def follower(%InstallSnapshot{members: members, term: term, last_committed_entry: last_entry, data: data, command_results: command_results} = rpc,
                state) do
     become_follower_if_new_term_started(rpc, state, fn ->
+      logs = Logs.new_for_new_follower(last_entry)
+      %State{state | members: members, current_term: term, logs: logs, data: data, command_results: command_results}
+      |> reset_election_timer_on_leader_message()
+      |> same_fsm_state()
+    end)
+  end
+  def follower(%InstallSnapshotCompressed{bin: bin}, state) do
+    %Snapshot{members: members, term: term, last_committed_entry: last_entry, data: data, command_results: command_results} = snapshot = :zlib.gunzip(bin) |> :erlang.binary_to_term()
+    become_follower_if_new_term_started(snapshot, state, fn ->
       logs = Logs.new_for_new_follower(last_entry)
       %State{state | members: members, current_term: term, logs: logs, data: data, command_results: command_results}
       |> reset_election_timer_on_leader_message()
@@ -765,5 +771,29 @@ defmodule RaftedValue.Server do
   defunp make_snapshot(%State{members: members, current_term: term, logs: logs, data: data, command_results: command_results, config: config}) :: Snapshot.t do
     last_entry = Logs.last_committed_entry(logs)
     %Snapshot{members: members, term: term, last_committed_entry: last_entry, data: data, command_results: command_results, config: config}
+  end
+
+  defunp make_install_snapshot(%State{members: members, current_term: term, logs: logs, data: data, command_results: command_results, config: config}) :: InstallSnapshot.t do
+    last_entry = Logs.last_committed_entry(logs)
+    %InstallSnapshot{members: members, term: term, last_committed_entry: last_entry, data: data, command_results: command_results, config: config}
+  end
+
+  defunp send_snapshot(%State{members:     members,
+                              logs:        logs,
+                              config:      %Config{communication_module: mod},
+                              persistence: persistence} = state,
+                       follower :: pid,
+                       send_fun :: ((module, InstallSnapshot.t | InstallSnapshotCompressed.t) -> :ok)) :: State.t do
+    # Avoid copying the entire `state` to minimize amount of data transfer to temporary process
+    case persistence do
+      %Persistence{latest_snapshot_metadata: %Persistence.SnapshotMetadata{path: path} = meta} ->
+        spawn(fn ->
+          send_fun.(mod, %InstallSnapshotCompressed{bin: File.read!(path)})
+        end)
+        %State{state | logs: Logs.set_follower_index_as_snapshot_last_index(logs, members, follower, meta)}
+      _ ->
+        send_fun.(mod, make_install_snapshot(state))
+        state
+    end
   end
 end

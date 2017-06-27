@@ -53,6 +53,12 @@ defmodule RaftedValue.RPC do
     ]
   end
 
+  defmodule InstallSnapshotCompressed do
+    use Croma.Struct, fields: [
+      bin: Croma.Binary,
+    ]
+  end
+
   defmodule TimeoutNow do
     use Croma.Struct, fields: [
       append_entries_req: AppendEntriesRequest,
