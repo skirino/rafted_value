@@ -185,14 +185,14 @@ defmodule RaftedValue.Server do
   end
 
   defunp call_add_server(known_members :: [GenServer.server]) :: Snapshot.t do
-    []                  -> raise "no leader found"
-    [m | known_members] ->
+    []       -> raise "no leader found"
+    [m | ms] ->
       case call_add_server_one(m) do
         {:ok, %Snapshot{} = snapshot}   -> snapshot
         {:ok, %InstallSnapshot{} = is}  -> Map.put(is, :__struct__, Snapshot) # convert message from older version of RaftedValue leader
-        {:error, {:not_leader, nil}}    -> call_add_server(known_members)
-        {:error, {:not_leader, leader}} -> call_add_server([leader | Enum.reject(known_members, &(&1 == leader))])
-        {:error, :noproc}               -> call_add_server(known_members)
+        {:error, {:not_leader, nil}}    -> call_add_server(ms)
+        {:error, {:not_leader, leader}} -> call_add_server([leader | List.delete(ms, leader)])
+        {:error, :noproc}               -> call_add_server(ms)
         # {:error, :uncommitted_membership_change} results in an error
       end
   end

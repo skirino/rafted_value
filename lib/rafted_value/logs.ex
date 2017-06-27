@@ -66,7 +66,7 @@ defmodule RaftedValue.Logs do
             entries:          slice_entries(m, i_next, i_max),
             i_leader_commit:  i_c,
             leader_timestamp: now,
-          } |> R.pure
+          } |> R.pure()
         end
     end
   end
@@ -79,7 +79,7 @@ defmodule RaftedValue.Logs do
                            persistence  :: nil | Persistence.t) :: {t, [LogEntry.t]} do
     new_followers =
       Map.put(followers, follower_pid, {i_replicated + 1, i_replicated})
-      |> Map.take(PidSet.delete(members_set, self()) |> PidSet.to_list) # in passing we remove outdated entries in `new_followers`
+      |> Map.take(PidSet.delete(members_set, self()) |> PidSet.to_list()) # in passing we remove outdated entries in `new_followers`
     new_logs      = %__MODULE__{logs | followers: new_followers} |> update_commit_index(current_term, members_set, persistence)
     applicable_entries = slice_entries(map, old_i_committed + 1, new_logs.i_committed)
     {new_logs, applicable_entries}
