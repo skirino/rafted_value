@@ -10,7 +10,8 @@
 ## Design
 
 - Provides [linearizable](https://en.wikipedia.org/wiki/Linearizability) semantics for operations on a stored value.
-- Memory-based, no persisted state; restarted members must catch up with its leader from scratch.
+- Implements memory-based state machine with optional persistence (writing logs, making snapshots with log compaction, restoring state from snapshot & log files)
+- Flexible data model: replicate arbitrary data structure
 - Supports membership changes:
     - adding/removing a member
     - replacing leader
@@ -24,18 +25,18 @@
 
 ## Example
 
-Suppose there are 3 erlang nodes running:
+Suppose there are 3 connected erlang nodes running:
 
 ```ex
-$ iex --sname foo -S mix
-iex(foo@skirino-Manjaro)1>
+$ iex --sname 1 -S mix
+iex(1@skirino-Manjaro)1>
 
-$ iex --sname bar -S mix
-iex(bar@skirino-Manjaro)1>
+$ iex --sname 2 -S mix
+iex(2@skirino-Manjaro)1>
 
-$ iex --sname baz -S mix
-iex(baz@skirino-Manjaro)1> Node.connect :"foo@skirino-Manjaro"
-iex(baz@skirino-Manjaro)1> Node.connect :"bar@skirino-Manjaro"
+$ iex --sname 3 -S mix
+iex(3@skirino-Manjaro)1> Node.connect :"1@skirino-Manjaro"
+iex(3@skirino-Manjaro)1> Node.connect :"2@skirino-Manjaro"
 ```
 
 Load the following module in all nodes.
@@ -58,44 +59,51 @@ end
 Then make a 3-member consensus group by spawning one process per node as follows:
 
 ```ex
-iex(foo@skirino-Manjaro)2> config = RaftedValue.make_config(QueueWithLength)
-iex(foo@skirino-Manjaro)3> {:ok, _} = RaftedValue.start_link({:create_new_consensus_group, config}, :foo)
+# :"1@skirino-Manjaro"
+iex(1@skirino-Manjaro)2> config = RaftedValue.make_config(QueueWithLength)
+iex(1@skirino-Manjaro)3> {:ok, _} = RaftedValue.start_link({:create_new_consensus_group, config}, [name: :foo])
 
-iex(bar@skirino-Manjaro)3> {:ok, _} = RaftedValue.start_link({:join_existing_consensus_group, [{:foo, :"foo@skirino-Manjaro"}]}, :bar)
+# :"2@skirino-Manjaro"
+iex(2@skirino-Manjaro)3> {:ok, _} = RaftedValue.start_link({:join_existing_consensus_group, [{:foo, :"1@skirino-Manjaro"}]}, [name: :bar])
 
-iex(baz@skirino-Manjaro)3> {:ok, _} = RaftedValue.start_link({:join_existing_consensus_group, [{:foo, :"foo@skirino-Manjaro"}]}, :baz)
+# :"3@skirino-Manjaro"
+iex(3@skirino-Manjaro)3> {:ok, _} = RaftedValue.start_link({:join_existing_consensus_group, [{:foo, :"1@skirino-Manjaro"}]}, [name: :baz])
 ```
 
 Now you can run commands on the replicated value:
 
 ```ex
-iex(foo@skirino-Manjaro)6> RaftedValue.command(:foo, {:enqueue, "a"})
+# :"1@skirino-Manjaro"
+iex(1@skirino-Manjaro)6> RaftedValue.command(:foo, {:enqueue, "a"})
 {:ok, 0}
-iex(foo@skirino-Manjaro)7> RaftedValue.command(:foo, {:enqueue, "b"})
+iex(1@skirino-Manjaro)7> RaftedValue.command(:foo, {:enqueue, "b"})
 {:ok, 1}
-iex(foo@skirino-Manjaro)8> RaftedValue.command(:foo, {:enqueue, "c"})
+iex(1@skirino-Manjaro)8> RaftedValue.command(:foo, {:enqueue, "c"})
 {:ok, 2}
-iex(foo@skirino-Manjaro)9> RaftedValue.command(:foo, {:enqueue, "d"})
+iex(1@skirino-Manjaro)9> RaftedValue.command(:foo, {:enqueue, "d"})
 {:ok, 3}
-iex(foo@skirino-Manjaro)10> RaftedValue.command(:foo, {:enqueue, "e"})
+iex(1@skirino-Manjaro)10> RaftedValue.command(:foo, {:enqueue, "e"})
 {:ok, 4}
 
-iex(bar@skirino-Manjaro)4> RaftedValue.command({:foo, :"foo@skirino-Manjaro"}, :dequeue)
+# :"2@skirino-Manjaro"
+iex(2@skirino-Manjaro)4> RaftedValue.command({:foo, :"1@skirino-Manjaro"}, :dequeue)
 {:ok, "a"}
-iex(bar@skirino-Manjaro)5> RaftedValue.command({:foo, :"foo@skirino-Manjaro"}, :dequeue)
+iex(2@skirino-Manjaro)5> RaftedValue.command({:foo, :"1@skirino-Manjaro"}, :dequeue)
 {:ok, "b"}
-iex(bar@skirino-Manjaro)6> RaftedValue.command({:foo, :"foo@skirino-Manjaro"}, {:enqueue, "f"})
+iex(2@skirino-Manjaro)6> RaftedValue.command({:foo, :"1@skirino-Manjaro"}, {:enqueue, "f"})
 {:ok, 3}
-iex(bar@skirino-Manjaro)7> RaftedValue.query({:foo, :"foo@skirino-Manjaro"}, :length)
+iex(2@skirino-Manjaro)7> RaftedValue.query({:foo, :"1@skirino-Manjaro"}, :length)
 {:ok, 4}
 ```
 
 The 3-member consensus group keeps on working if 1 member dies:
 
 ```ex
-iex(baz@skirino-Manjaro)4> :gen_fsm.stop(:baz)
+# :"3@skirino-Manjaro"
+iex(3@skirino-Manjaro)4> :gen_fsm.stop(:baz)
 
-iex(foo@skirino-Manjaro)11> RaftedValue.command(:foo, :dequeue)
+# :"1@skirino-Manjaro"
+iex(1@skirino-Manjaro)11> RaftedValue.command(:foo, :dequeue)
 {:ok, 3}
 ```
 
@@ -104,4 +112,4 @@ iex(foo@skirino-Manjaro)11> RaftedValue.command(:foo, :dequeue)
 - [Raft official website](https://raft.github.io/)
 - [The original paper](http://ramcloud.stanford.edu/raft.pdf)
 - [The thesis](https://ramcloud.stanford.edu/~ongaro/thesis.pdf)
-- [raft_fleet](https://github.com/skirino/raft_fleet)
+- [raft_fleet](https://github.com/skirino/raft_fleet) : Elixir library to run multiple RaftedValue consensus groups in cluster of ErlangVMs

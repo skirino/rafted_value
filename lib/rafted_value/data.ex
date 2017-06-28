@@ -3,7 +3,11 @@ defmodule RaftedValue.Data do
   A behaviour that defines data to be replicated by `RaftedValue` servers.
 
   It is required to implement a callback module of this behaviour to run a consensus group.
-  Concrete implementations of all callback functions of this behaviour must be [pure](https://en.wikipedia.org/wiki/Pure_function).
+  Concrete implementations of all callback functions of this behaviour must be [pure](https://en.wikipedia.org/wiki/Pure_function),
+  so that all members of a consensus group can reproduce the data by replicating only `command_arg`.
+  Therefore, for example, if you want to use "current time" in your command implementation,
+  you must not obtain current time in `command/1` implementation; you have to pass it by embedding in `command_arg`.
+  This is a design decision made to support arbitrary data structure while keeping Raft logs compact.
   """
 
   @type data        :: any
