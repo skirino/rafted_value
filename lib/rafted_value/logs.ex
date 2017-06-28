@@ -37,8 +37,8 @@ defmodule RaftedValue.Logs do
   defun commit_to_latest(%__MODULE__{map: map, i_max: i_max, i_committed: i_c} = logs,
                          persistence :: nil | Persistence.t) :: {t, [LogEntry.t]} do
     new_logs = %__MODULE__{logs | i_committed: i_max} |> truncate_old_logs(persistence)
-    applicable_entries = slice_entries(map, i_c + 1, i_max)
-    {new_logs, applicable_entries}
+    entries_to_apply = slice_entries(map, i_c + 1, i_max)
+    {new_logs, entries_to_apply}
   end
 
   defun make_append_entries_req(%__MODULE__{map: m, i_min: i_min, i_max: i_max, i_committed: i_c, followers: followers} = logs,
@@ -91,8 +91,8 @@ defmodule RaftedValue.Logs do
       Map.put(followers, follower_pid, {i_replicated + 1, i_replicated})
       |> Map.take(PidSet.delete(members_set, self()) |> PidSet.to_list()) # in passing we remove outdated entries in `new_followers`
     new_logs = %__MODULE__{logs | followers: new_followers} |> update_commit_index(current_term, members_set, persistence)
-    applicable_entries = slice_entries(map, old_i_committed + 1, new_logs.i_committed)
-    {new_logs, applicable_entries}
+    entries_to_apply = slice_entries(map, old_i_committed + 1, new_logs.i_committed)
+    {new_logs, entries_to_apply}
   end
 
   defunp update_commit_index(%__MODULE__{map: map, i_max: i_max, i_committed: i_c, followers: followers} = logs,
@@ -204,12 +204,18 @@ defmodule RaftedValue.Logs do
                        %Members{all: members_set} = members,
                        entries         :: [LogEntry.t],
                        i_leader_commit :: LogIndex.t,
-                       persistence     :: nil | Persistence.t) :: {t, Members.t, [LogEntry.t]} do
-    new_map         = Enum.into(entries, map, fn {_, index, _, _} = entry -> {index, entry} end)
-    new_i_max       = if Enum.empty?(entries), do: i_max, else: max(i_max, elem(List.last(entries), 1))
-    new_i_committed = max(old_i_committed, i_leader_commit)
-    new_logs        = %__MODULE__{logs | map: new_map, i_max: new_i_max, i_committed: new_i_committed} |> truncate_old_logs(persistence)
-    applicable_entries = slice_entries(new_map, old_i_committed + 1, new_i_committed)
+                       persistence     :: nil | Persistence.t) :: {t, Members.t, [LogEntry.t], [LogEntry.t]} do
+    {new_map, entries_to_persist_reversed} =
+      Enum.reduce(entries, {map, []}, fn({_, i, _, _} = e, {m, acc}) ->
+        case m[i] do
+          ^e                -> {m, acc}
+          _nil_or_different -> {Map.put(m, i, e), [e | acc]}
+        end
+      end)
+    new_i_max        = if Enum.empty?(entries), do: i_max, else: max(i_max, elem(List.last(entries), 1))
+    new_i_committed  = max(old_i_committed, i_leader_commit)
+    new_logs         = %__MODULE__{logs | map: new_map, i_max: new_i_max, i_committed: new_i_committed} |> truncate_old_logs(persistence)
+    entries_to_apply = slice_entries(new_map, old_i_committed + 1, new_i_committed)
 
     new_members_set = Enum.reduce(entries, members_set, &change_members/2)
     last_member_change_entry =
@@ -223,7 +229,7 @@ defmodule RaftedValue.Logs do
         %Members{members | all: new_members_set}
       end
 
-    {new_logs, new_members, applicable_entries}
+    {new_logs, new_members, entries_to_apply, Enum.reverse(entries_to_persist_reversed)}
   end
 
   defun candidate_log_up_to_date?(%__MODULE__{map: m, i_max: i_max}, candidate_log_info :: LogInfo.t) :: boolean do

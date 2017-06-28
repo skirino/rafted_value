@@ -105,4 +105,51 @@ defmodule RaftedValue.PersistenceAndRecoveryTest do
     assert RaftedValue.query(@name, :get) == {:ok, 3}
     assert :gen_fsm.stop(@name) == :ok
   end
+
+  test "follower should replicate log entries and store them in disk with de-duplication" do
+    dir_l = Path.join(@tmp_dir, "l")
+    dir_f = Path.join(@tmp_dir, "f")
+    {:ok, l} = RaftedValue.start_link({:create_new_consensus_group, @config}, nil, dir_l)
+    {:ok, f} = RaftedValue.start_link({:join_existing_consensus_group, [l]} , nil, dir_f)
+
+    # In case leader hasn't received AppendEntriesResponse from the follower, the leader re-sends part of log entries.
+    # (This can happen also in non-persisting setup but is much more frequent in persisting setup as followers must flush log entries before replying to its leader)
+    assert RaftedValue.command(l, :inc) == {:ok, 0}
+
+    # The follower should de-duplicate the received log entries before writing them to disk.
+    [log_path] = Path.wildcard(Path.join(dir_f, "log_*"))
+    entries = LogEntry.read_as_stream(log_path) |> Enum.to_list()
+    assert entries == Enum.uniq(entries)
+
+    assert :gen_fsm.stop(f) == :ok
+    assert :gen_fsm.stop(l) == :ok
+  end
+
+  test "non-persisting and persisting members can interchange snapshots with each other" do
+    {:ok, n1} = RaftedValue.start_link({:create_new_consensus_group, @config})
+    Enum.each(0 .. 10, fn i ->
+      assert RaftedValue.command(n1, :inc) == {:ok, i}
+    end)
+    # send snapshot: `n1` => `p1`
+    {:ok, p1} = RaftedValue.start_link({:join_existing_consensus_group, [n1]}, nil, @tmp_dir)
+    Enum.each(11 .. 20, fn i ->
+      assert RaftedValue.command(n1, :inc) == {:ok, i}
+    end)
+    assert :gen_fsm.stop(p1) == :ok
+    assert :gen_fsm.stop(n1) == :ok
+
+    # recover from disk snapshot
+    {:ok, p2} = RaftedValue.start_link({:create_new_consensus_group, @config}, nil, @tmp_dir)
+    Enum.each(21 .. 30, fn i ->
+      assert RaftedValue.command(p2, :inc) == {:ok, i}
+    end)
+    # send snapshot: `p2` => `n2`
+    {:ok, n2} = RaftedValue.start_link({:join_existing_consensus_group, [p2]})
+    Enum.each(31 .. 40, fn i ->
+      assert RaftedValue.command(p2, :inc) == {:ok, i}
+    end)
+
+    assert :gen_fsm.stop(n2) == :ok
+    assert :gen_fsm.stop(p2) == :ok
+  end
 end

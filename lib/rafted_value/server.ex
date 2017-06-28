@@ -132,14 +132,14 @@ defmodule RaftedValue.Server do
           {snapshot_from_disk, snapshot_meta, log_entries} ->
             # In this case we neglect `config` given in the argument to `RaftedValue.start_link/2`.
             # On the other hand we discard `members` obtained from disk, as `self()` is the sole member of this newly-spawned consensus group.
-            members                     = Members.new_for_lonely_leader()
-            snapshot                    = %Snapshot{snapshot_from_disk | members: members}
-            logs1                       = Logs.new_for_lonely_leader(snapshot.last_committed_entry, log_entries)
-            {logs2, entry_elected}      = Logs.add_entry_on_elected_leader(logs1, members, snapshot.term, nil)
-            persistence                 = Persistence.new_with_disk_snapshot(dir, snapshot_meta, entry_elected)
-            {logs3, applicable_entries} = Logs.commit_to_latest(logs2, persistence)
-            state                       = build_state_from_snapshot(snapshot, logs3, persistence)
-            Enum.reduce(applicable_entries, state, &leader_apply_committed_log_entry_without_membership_change/2) # `entry_elected` results in a no-op and thus neglected
+            members                   = Members.new_for_lonely_leader()
+            snapshot                  = %Snapshot{snapshot_from_disk | members: members}
+            logs1                     = Logs.new_for_lonely_leader(snapshot.last_committed_entry, log_entries)
+            {logs2, entry_elected}    = Logs.add_entry_on_elected_leader(logs1, members, snapshot.term, nil)
+            persistence               = Persistence.new_with_disk_snapshot(dir, snapshot_meta, entry_elected)
+            {logs3, entries_to_apply} = Logs.commit_to_latest(logs2, persistence)
+            state                     = build_state_from_snapshot(snapshot, logs3, persistence)
+            Enum.reduce(entries_to_apply, state, &leader_apply_committed_log_entry_without_membership_change/2) # `entry_elected` results in a no-op and thus neglected
         end
     end
   end
@@ -216,9 +216,9 @@ defmodule RaftedValue.Server do
     become_follower_if_new_term_started(rpc, state, fn ->
       new_leadership = Leadership.follower_responded(leadership, members, from, leader_timestamp, config)
       if success do
-        {new_logs, applicable_entries} = Logs.set_follower_index(logs, members, current_term, from, i_replicated, persistence)
+        {new_logs, entries_to_apply} = Logs.set_follower_index(logs, members, current_term, from, i_replicated, persistence)
         new_state1 = %State{state | leadership: new_leadership, logs: new_logs}
-        new_state2 = Enum.reduce(applicable_entries, new_state1, &leader_apply_committed_log_entry/2)
+        new_state2 = Enum.reduce(entries_to_apply, new_state1, &leader_apply_committed_log_entry/2)
         case members do
           %Members{pending_leader_change: ^from} ->
             # now we know that the follower `from` is alive => make it a new leader
@@ -357,10 +357,10 @@ defmodule RaftedValue.Server do
     if Enum.empty?(followers) do
       # When there's no other member in this consensus group, the leader won't receive AppendEntriesResponse;
       # here is the time to make decisions (solely by itself) by committing new entries.
-      {new_logs, applicable_entries} = Logs.commit_to_latest(logs, persistence)
+      {new_logs, entries_to_apply} = Logs.commit_to_latest(logs, persistence)
       new_leadership = Leadership.reset_quorum_timer(leadership, config) # quorum is reached by the leader itself
       new_state = %State{state | leadership: new_leadership, logs: new_logs}
-      Enum.reduce(applicable_entries, new_state, &leader_apply_committed_log_entry/2)
+      Enum.reduce(entries_to_apply, new_state, &leader_apply_committed_log_entry/2)
     else
       now = Monotonic.millis()
       Enum.reduce(followers, state, fn(follower, s) ->
@@ -474,10 +474,12 @@ defmodule RaftedValue.Server do
     %AppendEntriesRequest{term: term, prev_log: prev_log, entries: entries, i_leader_commit: i_leader_commit} = req
     if term == current_term and Logs.contain_given_prev_log?(logs, prev_log) do
       # catch up with the leader and then start election
-      {new_logs, new_members1, applicable_entries} = Logs.append_entries(logs, members, entries, i_leader_commit, persistence)
-      new_state1 = %State{state | members: new_members1, logs: new_logs} |> persist_log_entries(entries)
-      new_state2 = Enum.reduce(applicable_entries, new_state1, &nonleader_apply_committed_log_entry/2)
-      become_candidate_and_start_new_election(new_state2, true)
+      {new_logs, new_members1, entries_to_apply, entries_to_persist} =
+        Logs.append_entries(logs, members, entries, i_leader_commit, persistence)
+      new_state = %State{state | members: new_members1, logs: new_logs}
+      Enum.reduce(entries_to_apply, new_state, &nonleader_apply_committed_log_entry/2)
+      |> persist_log_entries(entries_to_persist)
+      |> become_candidate_and_start_new_election(true)
     else
       # if condition is not met neglect the message
       same_fsm_state(state)
@@ -555,10 +557,11 @@ defmodule RaftedValue.Server do
       next_state(state, current_state_name)
     else
       if Logs.contain_given_prev_log?(logs, prev_log) do
-        {new_logs, new_members1, applicable_entries} = Logs.append_entries(logs, members, entries, i_leader_commit, persistence)
+        {new_logs, new_members1, entries_to_apply, entries_to_persist} =
+          Logs.append_entries(logs, members, entries, i_leader_commit, persistence)
         new_members2 = Members.put_leader(new_members1, leader_pid)
         new_state1 = %State{state | members: new_members2, current_term: term, logs: new_logs}
-        new_state2 = Enum.reduce(applicable_entries, new_state1, &nonleader_apply_committed_log_entry/2) |> persist_log_entries(entries)
+        new_state2 = Enum.reduce(entries_to_apply, new_state1, &nonleader_apply_committed_log_entry/2) |> persist_log_entries(entries_to_persist)
         reply = %AppendEntriesResponse{from: self(), term: term, success: true, i_replicated: new_logs.i_max, leader_timestamp: leader_timestamp}
         send_event(new_state2, leader_pid, reply)
         new_state2

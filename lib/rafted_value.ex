@@ -80,7 +80,7 @@ defmodule RaftedValue do
       election_timeout_clock_drift_margin: Keyword.get(opts, :election_timeout_clock_drift_margin, election_timeout),
       max_retained_committed_logs:         100,
       max_retained_command_results:        Keyword.get(opts, :max_retained_command_results       , 100),
-    } |> Config.validate!
+    } |> Config.validate!()
   end
 
   @type not_leader :: {:not_leader, nil | pid}
