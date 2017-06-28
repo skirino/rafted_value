@@ -41,6 +41,10 @@ defmodule RaftedValue.Persistence do
     |> switch_log_file_and_spawn_snapshot_writer(snapshot, index_snapshot + 1)
   end
 
+  defun unset_snapshot_metadata(p :: t) :: t do
+    %__MODULE__{p | latest_snapshot_metadata: nil}
+  end
+
   defun write_log_entries(%__MODULE__{log_fd: fd, log_size_written: size} = p, entries :: [LogEntry.t]) :: t do
     bin = Enum.map(entries, &LogEntry.to_binary/1) |> :erlang.iolist_to_binary()
     :ok = :file.write(fd, bin)

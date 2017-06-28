@@ -3,6 +3,7 @@ use Croma
 defmodule RaftedValue.Snapshot do
   alias RaftedValue.{Members, TermNumber, LogEntry, Config, CommandResults, Persistence}
   alias RaftedValue.Persistence.SnapshotMetadata
+  alias RaftedValue.RPC.InstallSnapshot
 
   use Croma.Struct, fields: [
     members:              Members,
@@ -12,6 +13,10 @@ defmodule RaftedValue.Snapshot do
     data:                 Croma.Any,
     command_results:      CommandResults,
   ]
+
+  defun from_install_snapshot(is :: InstallSnapshot.t) :: t do
+    Map.put(is, :__struct__, __MODULE__)
+  end
 
   defun read_lastest_snapshot_and_logs_if_available(dir :: Path.t) :: nil | {t, SnapshotMetadata.t, Enum.t(LogEntry.t)} do
     case find_snapshot_and_log_files(dir) do

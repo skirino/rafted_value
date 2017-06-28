@@ -480,7 +480,7 @@ defmodule RaftedValueTest do
     end
   end
 
-  defp pick_data_manipulation do
+  defp pick_data_manipulation() do
     Enum.random([
       {:command, {:set, :rand.uniform(10)}},
       {:command, :inc},
@@ -515,7 +515,7 @@ defmodule RaftedValueTest do
         {:ok, _} = RaftedValue.Server.State.validate(state)
         assert_server_state_invariants(member, state_name, state)
         assert_server_logs_invariants(state.logs, state.persistence)
-        assert_server_persistence_invariants(state_name, state.logs, state.persistence)
+        assert_server_persistence_invariants(state.logs, state.persistence)
         assert_server_data_invariants(context0, state)
       end)
     assert_cluster_wide_invariants(new_context, member_state_pairs)
@@ -562,14 +562,12 @@ defmodule RaftedValueTest do
     end
   end
 
-  defp assert_server_persistence_invariants(state_name, logs, persistence) do
+  defp assert_server_persistence_invariants(logs, persistence) do
     if persistence do
       meta = persistence.latest_snapshot_metadata
       if meta do
         assert meta.last_committed_index <= logs.i_committed
-        if state_name == :leader do # TODO: This condition should be removed
-          assert logs.i_min <= meta.last_committed_index + 1 # `logs` must contain all non-compacted entries (if any)
-        end
+        assert logs.i_min <= meta.last_committed_index + 1 # `logs` must contain all non-compacted entries
       end
     end
   end
@@ -633,8 +631,8 @@ defmodule RaftedValueTest do
     followers_in_majority = List.delete(working, leader)
     next_leader = Enum.random(followers_in_majority)
     assert RaftedValue.replace_leader(leader, next_leader) == :ok
-    new_leader = receive_leader_elected_message() || raise "leader should be elected"
-    %{context | current_leader: new_leader}
+    assert_receive({:elected, ^next_leader}, @t_max_election_timeout)
+    %{context | current_leader: next_leader}
   end
 
   def op_add_follower(context) do
@@ -647,7 +645,7 @@ defmodule RaftedValueTest do
           Path.join(dir, random)
       end
     new_follower = add_follower(leader, nil, persistence_dir)
-    assert_receive({:follower_added, _pid}, @t_max_election_timeout)
+    assert_receive({:follower_added, ^new_follower}, @t_max_election_timeout)
     %{context | working: [new_follower | context.working]}
   end
 
@@ -703,7 +701,7 @@ defmodule RaftedValueTest do
     def on_elected(_)                   , do: send(:test_runner, {:elected, self()})
   end
 
-  defp receive_leader_elected_message do
+  defp receive_leader_elected_message() do
     receive do
       {:elected, pid} -> pid
     after
@@ -770,7 +768,7 @@ defmodule RaftedValueTest do
   end
 
   defmodule CommunicationWithNetsplit do
-    def start do
+    def start() do
       Agent.start_link(fn -> [] end, name: __MODULE__)
     end
 
@@ -801,6 +799,7 @@ defmodule RaftedValueTest do
   end
 
   defp assert_leader_status(leader, members, isolated) do
+    :timer.sleep(@conf.heartbeat_timeout)
     s = RaftedValue.status(leader)
     assert s.state_name == :leader
     assert_equal_as_set(s.members, members)
@@ -822,8 +821,7 @@ defmodule RaftedValueTest do
 
         # cause netsplit
         n_isolated = :rand.uniform(div(length(c1.working) - 1, 2))
-        isolated0 = Enum.take_random(c1.working -- [c1.current_leader], n_isolated - 1)
-        isolated = [c1.current_leader | isolated0]
+        isolated = Enum.take_random(c1.working, n_isolated)
         working_after_split  = c1.working -- isolated
         send(client_pid, {:members, working_after_split})
         CommunicationWithNetsplit.set(isolated)
@@ -832,10 +830,10 @@ defmodule RaftedValueTest do
             # although Raft election can take arbitrarily long, trying 3 times is reasonably successful here
             receive_leader_elected_message() || receive_leader_elected_message() || receive_leader_elected_message() || raise "no leader elected after netsplit!"
           else
+            :timer.sleep(@t_max_election_timeout) # Wait until the leader recognizes isolated members as unhealthy
             c1.current_leader
           end
         c2 = %{c1 | working: working_after_split, isolated: isolated, current_leader: leader_after_netsplit}
-        :timer.sleep(100)
         assert_leader_status(leader_after_netsplit, c1.working, isolated)
 
         c3 = repeatedly_change_cluster_configuration(c2, client_pid, 5)

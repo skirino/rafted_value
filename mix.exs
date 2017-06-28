@@ -3,7 +3,7 @@ defmodule RaftedValue.Mixfile do
 
   @github_url "https://github.com/skirino/rafted_value"
 
-  def project do
+  def project() do
     [
       app:             :rafted_value,
       version:         "0.2.0",
@@ -19,11 +19,11 @@ defmodule RaftedValue.Mixfile do
     ]
   end
 
-  def application do
+  def application() do
     [applications: [:croma]]
   end
 
-  defp deps do
+  defp deps() do
     [
       {:croma  , "~> 0.6"},
       {:coverex, "~> 1.4" , only: :test},
@@ -32,7 +32,7 @@ defmodule RaftedValue.Mixfile do
     ]
   end
 
-  defp package do
+  defp package() do
     [
       files:       ["lib", "mix.exs", "README.md", "LICENSE"],
       maintainers: ["Shunsuke Kirino"],

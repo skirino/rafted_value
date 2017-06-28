@@ -266,17 +266,23 @@ defmodule RaftedValue.Logs do
     end
   end
 
+  @extra_log_entries_kept_in_memory (if Mix.env() == :test, do: 30, else: 100)
+
   defunp truncate_old_logs(%__MODULE__{map: map, i_min: i_min, i_committed: i_c} = logs,
                            persistence_or_nil :: nil | Persistence.t) :: t do
     index_removable_upto =
       case persistence_or_nil do
-        %Persistence{latest_snapshot_metadata: %SnapshotMetadata{last_committed_index: i}} -> i
-        _ -> i_c
+        %Persistence{latest_snapshot_metadata: nil} ->
+          0 # persisting logs but no snapshot has been created on disk => during initialization and should not truncate log entries
+        %Persistence{latest_snapshot_metadata: %SnapshotMetadata{last_committed_index: i}} ->
+          i # snapshot which reflects log entries upto `i` => upto `i` can be discarded
+        nil ->
+          i_c # purely in-memory setup, log entries can be discarded immediately after they are committed
       end
     # We don't use `followers` field to compute threshold index to discard; use fixed value (`100`) to keep extra log entries instead,
     # because `followers` field is available only to leader processes.
     # If a follower lags too behind then leader gives up log shipping and sends a snapshot, so it's OK.
-    case index_removable_upto - 99 do
+    case index_removable_upto - @extra_log_entries_kept_in_memory + 1 do
       new_i_min when new_i_min > i_min -> %__MODULE__{logs | map: Map.drop(map, i_min .. new_i_min - 1), i_min: new_i_min}
       _                                -> logs
     end

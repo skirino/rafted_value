@@ -191,7 +191,7 @@ defmodule RaftedValue.Server do
     []       -> raise "no leader found"
     [m | ms] ->
       case call_add_server_one(m) do
-        {:ok, %InstallSnapshot{} = is}              -> Map.put(is, :__struct__, Snapshot)
+        {:ok, %InstallSnapshot{} = is}              -> Snapshot.from_install_snapshot(is)
         {:ok, %InstallSnapshotCompressed{bin: bin}} -> Snapshot.decode(bin)
         {:error, {:not_leader, nil}}                -> call_add_server(ms)
         {:error, {:not_leader, leader}}             -> call_add_server([leader | List.delete(ms, leader)])
@@ -228,7 +228,7 @@ defmodule RaftedValue.Server do
                 send_event(new_state2, from, req)
                 convert_state_as_follower(new_state2, current_term) |> next_state(:follower) # step down in order not to serve client requests any more
               {:too_old, _} ->
-                # `from`'s logs lag too behind => try next time
+                # `from`'s logs lag too behind => try leader change next time
                 same_fsm_state(new_state2)
             end
           _ -> same_fsm_state(new_state2)
@@ -486,23 +486,13 @@ defmodule RaftedValue.Server do
   def follower(:remove_follower_completed, state) do
     {:stop, :normal, state}
   end
-  def follower(%InstallSnapshot{members: members, term: term, last_committed_entry: last_entry, data: data, command_results: command_results} = rpc,
-               state) do
-    become_follower_if_new_term_started(rpc, state, fn ->
-      logs = Logs.new_for_new_follower(last_entry)
-      %State{state | members: members, current_term: term, logs: logs, data: data, command_results: command_results}
-      |> reset_election_timer_on_leader_message()
-      |> same_fsm_state()
-    end)
+  def follower(%InstallSnapshot{} = rpc, state) do
+    handle_install_snapshot(Snapshot.from_install_snapshot(rpc), state)
+    |> same_fsm_state()
   end
   def follower(%InstallSnapshotCompressed{bin: bin}, state) do
-    %Snapshot{members: members, term: term, last_committed_entry: last_entry, data: data, command_results: command_results} = snapshot = Snapshot.decode(bin)
-    become_follower_if_new_term_started(snapshot, state, fn ->
-      logs = Logs.new_for_new_follower(last_entry)
-      %State{state | members: members, current_term: term, logs: logs, data: data, command_results: command_results}
-      |> reset_election_timer_on_leader_message()
-      |> same_fsm_state()
-    end)
+    handle_install_snapshot(Snapshot.decode(bin), state)
+    |> same_fsm_state()
   end
   def follower(_event, state) do
     same_fsm_state(state) # neglect `:heartbeat_timeout`, `cannot_reach_quorum`,
@@ -532,6 +522,20 @@ defmodule RaftedValue.Server do
     new_members  = Members.put_leader(members, nil)
     new_election = Election.update_for_follower(election, config)
     %State{state | members: new_members, current_term: new_term, leadership: nil, election: new_election}
+  end
+
+  defunp handle_install_snapshot(%Snapshot{members:              members,
+                                           term:                 term,
+                                           last_committed_entry: last_entry,
+                                           data:                 data,
+                                           command_results:      command_results} = snapshot,
+                                 %State{persistence: persistence} = state) :: State.t do
+    become_follower_if_new_term_started(snapshot, state, fn ->
+      new_logs        = Logs.new_for_new_follower(last_entry)
+      new_persistence = if is_nil(persistence), do: nil, else: Persistence.unset_snapshot_metadata(persistence) # invalidate existing snapshot file
+      %State{state | members: members, current_term: term, logs: new_logs, data: data, command_results: command_results, persistence: new_persistence}
+      |> reset_election_timer_on_leader_message()
+    end)
   end
 
   #
