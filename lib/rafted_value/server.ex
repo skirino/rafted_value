@@ -87,6 +87,7 @@ defmodule RaftedValue.Server do
 
   defmacrop same_fsm_state(state_data) do
     {state_name, _arity} = __CALLER__.function
+    unless state_name in [:leader, :candidate, :follower], do: raise "`same_fsm_state/1` macro must be called from `leader`, `candidate`, `follower`"
     quote bind_quoted: [state_name: state_name, state_data: state_data] do
       {:next_state, state_name, state_data}
     end
@@ -94,6 +95,7 @@ defmodule RaftedValue.Server do
 
   defmacrop same_fsm_state_reply(state_data, reply) do
     {state_name, _arity} = __CALLER__.function
+    unless state_name in [:leader, :candidate, :follower], do: raise "`same_fsm_state/1` macro must be called from `leader`, `candidate`, `follower`"
     quote bind_quoted: [state_name: state_name, state_data: state_data, reply: reply] do
       {:reply, reply, state_name, state_data}
     end
@@ -236,12 +238,12 @@ defmodule RaftedValue.Server do
         new_logs = Logs.decrement_next_index_of_follower(logs, from)
         %State{state | leadership: new_leadership, logs: new_logs}
         |> send_append_entries(from, Monotonic.millis())
-        |> same_fsm_state
+        |> same_fsm_state()
       end
     end)
   end
   def leader(:heartbeat_timeout, state) do
-    broadcast_append_entries(state) |> same_fsm_state
+    broadcast_append_entries(state) |> same_fsm_state()
   end
   def leader(:cannot_reach_quorum, %State{current_term: term} = state) do
     convert_state_as_follower(state, term)
