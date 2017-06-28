@@ -108,26 +108,27 @@ defmodule RaftedValue.Server do
   #
   # initialization
   #
-  def init({{:create_new_consensus_group, config}, persistence_dir_or_nil}) do
-    {:ok, :leader, initialize_leader_state(config, persistence_dir_or_nil)}
+  def init({{:create_new_consensus_group, config}, options}) do
+    {:ok, :leader, initialize_leader_state(config, options)}
   end
 
-  def init({{:join_existing_consensus_group, known_members}, persistence_dir_or_nil}) do
-    {:ok, :follower, initialize_follower_state(known_members, persistence_dir_or_nil)}
+  def init({{:join_existing_consensus_group, known_members}, options}) do
+    {:ok, :follower, initialize_follower_state(known_members, options)}
   end
 
-  defunp initialize_leader_state(config :: Config.t, persistence_dir_or_nil :: nil | Path.t) :: State.t do
-    case persistence_dir_or_nil do
+  defunp initialize_leader_state(config :: Config.t, options :: [RaftedValue.option]) :: State.t do
+    case Keyword.get(options, :persistence_dir) do
       nil ->
         snapshot = generate_empty_snapshot_for_lonely_leader(config)
         logs     = Logs.new_for_lonely_leader(snapshot.last_committed_entry, [])
         build_state_from_snapshot(snapshot, logs, nil)
       dir ->
+        log_expansion_factor = Keyword.fetch!(options, :log_file_expansion_factor)
         case Snapshot.read_lastest_snapshot_and_logs_if_available(dir) do
           nil ->
             snapshot    = generate_empty_snapshot_for_lonely_leader(config)
             logs        = Logs.new_for_lonely_leader(snapshot.last_committed_entry, [])
-            persistence = Persistence.new_with_initial_snapshotting(dir, snapshot)
+            persistence = Persistence.new_with_initial_snapshotting(dir, log_expansion_factor, snapshot)
             build_state_from_snapshot(snapshot, logs, persistence)
           {snapshot_from_disk, snapshot_meta, log_entries} ->
             # In this case we neglect `config` given in the argument to `RaftedValue.start_link/2`.
@@ -136,7 +137,7 @@ defmodule RaftedValue.Server do
             snapshot                  = %Snapshot{snapshot_from_disk | members: members}
             logs1                     = Logs.new_for_lonely_leader(snapshot.last_committed_entry, log_entries)
             {logs2, entry_elected}    = Logs.add_entry_on_elected_leader(logs1, members, snapshot.term, nil)
-            persistence               = Persistence.new_with_disk_snapshot(dir, snapshot_meta, entry_elected)
+            persistence               = Persistence.new_with_disk_snapshot(dir, log_expansion_factor, snapshot_meta, entry_elected)
             {logs3, entries_to_apply} = Logs.commit_to_latest(logs2, persistence)
             state                     = build_state_from_snapshot(snapshot, logs3, persistence)
             Enum.reduce(entries_to_apply, state, &leader_apply_committed_log_entry_without_membership_change/2) # `entry_elected` results in a no-op and thus neglected
@@ -175,14 +176,16 @@ defmodule RaftedValue.Server do
     }
   end
 
-  defunp initialize_follower_state(known_members :: [GenServer.server], persistence_dir_or_nil :: nil | Path.t) :: State.t do
+  defunp initialize_follower_state(known_members :: [GenServer.server], options :: [RaftedValue.option]) :: State.t do
     %Snapshot{members: members, term: term, last_committed_entry: last_entry, data: data, command_results: command_results, config: config} = snapshot = call_add_server(known_members)
     logs        = Logs.new_for_new_follower(last_entry)
     election    = Election.new_for_follower(config)
     persistence =
-      case persistence_dir_or_nil do
+      case Keyword.get(options, :persistence_dir) do
         nil -> nil
-        dir -> Persistence.new_with_snapshot_sent_from_leader(dir, snapshot)
+        dir ->
+          log_expansion_factor = Keyword.fetch!(options, :log_file_expansion_factor)
+          Persistence.new_with_snapshot_sent_from_leader(dir, log_expansion_factor, snapshot)
       end
     %State{members: members, current_term: term, election: election, logs: logs, data: data, command_results: command_results, config: config, persistence: persistence}
   end

@@ -16,28 +16,28 @@ defmodule RaftedValue.Persistence do
     dir:                      Croma.String,
     log_fd:                   Croma.TypeGen.nilable(Croma.Tuple), # This field is `nil` only during initialization (within `new_with_initial_snapshotting/2`)
     log_size_written:         Croma.NonNegInteger,
-    log_expansion_factor:     Croma.Float,
+    log_expansion_factor:     Croma.Number,
     latest_snapshot_metadata: Croma.TypeGen.nilable(SnapshotMetadata), # This field is `nil` only between startup and first snapshot
     snapshot_writer:          Croma.TypeGen.nilable(Croma.Pid),
   ]
 
-  defun new_with_initial_snapshotting(dir :: Path.t, snapshot :: Snapshot.t) :: t do
+  defun new_with_initial_snapshotting(dir :: Path.t, factor :: number, snapshot :: Snapshot.t) :: t do
     File.mkdir_p!(dir)
     {_, index_first, _, _} = entry_elected = snapshot.last_committed_entry
-    %__MODULE__{dir: dir, log_size_written: 0, log_expansion_factor: 4.0} # `log_fd` will be filled soon
+    %__MODULE__{dir: dir, log_size_written: 0, log_expansion_factor: factor} # `log_fd` will be filled soon
     |> switch_log_file_and_spawn_snapshot_writer(snapshot, index_first)
     |> write_log_entries([entry_elected])
   end
 
-  defun new_with_disk_snapshot(dir :: Path.t, meta :: SnapshotMetadata.t, {_, index_first, _, _} = entry_elected :: LogEntry.t) :: t do
-    %__MODULE__{dir: dir, log_fd: open_log_file(dir, index_first), log_size_written: 0, log_expansion_factor: 4.0, latest_snapshot_metadata: meta}
+  defun new_with_disk_snapshot(dir :: Path.t, factor :: number, meta :: SnapshotMetadata.t, {_, index_first, _, _} = entry_elected :: LogEntry.t) :: t do
+    %__MODULE__{dir: dir, log_fd: open_log_file(dir, index_first), log_size_written: 0, log_expansion_factor: factor, latest_snapshot_metadata: meta}
     |> write_log_entries([entry_elected])
   end
 
-  defun new_with_snapshot_sent_from_leader(dir :: Path.t, snapshot :: Snapshot.t) :: t do
+  defun new_with_snapshot_sent_from_leader(dir :: Path.t, factor :: number, snapshot :: Snapshot.t) :: t do
     File.mkdir_p!(dir)
     {_, index_snapshot, _, _} = snapshot.last_committed_entry
-    %__MODULE__{dir: dir, log_size_written: 0, log_expansion_factor: 4.0} # `log_fd` will be filled soon
+    %__MODULE__{dir: dir, log_size_written: 0, log_expansion_factor: factor} # `log_fd` will be filled soon
     |> switch_log_file_and_spawn_snapshot_writer(snapshot, index_snapshot + 1)
   end
 

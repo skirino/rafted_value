@@ -58,39 +58,39 @@ defmodule RaftedValue.PersistenceAndRecoveryTest do
   end
 
   test "persist logs and snapshots and recover by reading them" do
-    {:ok, _} = RaftedValue.start_link({:create_new_consensus_group, @config}, @name, @tmp_dir)
+    {:ok, _} = RaftedValue.start_link({:create_new_consensus_group, @config}, [name: @name, persistence_dir: @tmp_dir])
     assert in_memory_and_disk_logs_same?(1..1)
     assert :gen_fsm.stop(@name) == :ok
     snapshot_path1 = Path.join(@tmp_dir, "snapshot_0_1")
     assert %Snapshot{} = read_snapshot(snapshot_path1)
     snapshot_committed_index1 = 1
 
-    {:ok, _} = RaftedValue.start_link({:create_new_consensus_group, @config}, @name, @tmp_dir)
+    {:ok, _} = RaftedValue.start_link({:create_new_consensus_group, @config}, [name: @name, persistence_dir: @tmp_dir])
     assert in_memory_and_disk_logs_same?(snapshot_committed_index1 .. snapshot_committed_index1 + 1)
     assert RaftedValue.command(@name, :inc) == {:ok, 0}
     assert in_memory_and_disk_logs_same?(1..3)
     assert :gen_fsm.stop(@name) == :ok
 
-    {:ok, _} = RaftedValue.start_link({:create_new_consensus_group, @config}, @name, @tmp_dir)
+    {:ok, _} = RaftedValue.start_link({:create_new_consensus_group, @config}, [name: @name, persistence_dir: @tmp_dir])
     assert in_memory_and_disk_logs_same?(snapshot_committed_index1 .. snapshot_committed_index1 + 3)
-    Enum.each(1..20, fn i ->
+    Enum.each(1 .. 40, fn i ->
       assert RaftedValue.command(@name, :inc) == {:ok, i}
     end)
-    assert in_memory_and_disk_logs_same?(snapshot_committed_index1 .. snapshot_committed_index1 + 23)
+    assert in_memory_and_disk_logs_same?(snapshot_committed_index1 .. snapshot_committed_index1 + 43)
     assert :gen_fsm.stop(@name) == :ok
     [snapshot_path2] = Path.wildcard(Path.join(@tmp_dir, "snapshot_*")) |> List.delete(snapshot_path1)
     assert %Snapshot{} = read_snapshot(snapshot_path2)
     snapshot_committed_index2 = snapshot_path_to_committed_index(snapshot_path2)
 
-    {:ok, _} = RaftedValue.start_link({:create_new_consensus_group, @config}, @name, @tmp_dir)
-    assert in_memory_and_disk_logs_same?(snapshot_committed_index2 .. snapshot_committed_index1 + 24)
-    assert RaftedValue.query(@name, :get) == {:ok, 21}
+    {:ok, _} = RaftedValue.start_link({:create_new_consensus_group, @config}, [name: @name, persistence_dir: @tmp_dir])
+    assert in_memory_and_disk_logs_same?(snapshot_committed_index2 .. snapshot_committed_index1 + 44)
+    assert RaftedValue.query(@name, :get) == {:ok, 41}
     assert :gen_fsm.stop(@name) == :ok
   end
 
   test "uncommitted logs should be committed by lonely leader immediately after recovery" do
-    {:ok, l} = RaftedValue.start_link({:create_new_consensus_group, @config}, nil, @tmp_dir)
-    {:ok, f} = RaftedValue.start_link({:join_existing_consensus_group, [l]}, nil, nil)
+    {:ok, l} = RaftedValue.start_link({:create_new_consensus_group, @config}, [persistence_dir: @tmp_dir])
+    {:ok, f} = RaftedValue.start_link({:join_existing_consensus_group, [l]})
     assert MapSet.new(RaftedValue.status(l).members) == MapSet.new([l, f])
     assert :gen_fsm.stop(f) == :ok
 
@@ -101,7 +101,7 @@ defmodule RaftedValue.PersistenceAndRecoveryTest do
     assert :gen_fsm.stop(l) == :ok
 
     # Restore from snapshot, commands should be applied
-    {:ok, _} = RaftedValue.start_link({:create_new_consensus_group, @config}, @name, @tmp_dir)
+    {:ok, _} = RaftedValue.start_link({:create_new_consensus_group, @config}, [name: @name, persistence_dir: @tmp_dir])
     assert RaftedValue.query(@name, :get) == {:ok, 3}
     assert :gen_fsm.stop(@name) == :ok
   end
@@ -109,8 +109,8 @@ defmodule RaftedValue.PersistenceAndRecoveryTest do
   test "follower should replicate log entries and store them in disk with de-duplication" do
     dir_l = Path.join(@tmp_dir, "l")
     dir_f = Path.join(@tmp_dir, "f")
-    {:ok, l} = RaftedValue.start_link({:create_new_consensus_group, @config}, nil, dir_l)
-    {:ok, f} = RaftedValue.start_link({:join_existing_consensus_group, [l]} , nil, dir_f)
+    {:ok, l} = RaftedValue.start_link({:create_new_consensus_group, @config}, [persistence_dir: dir_l])
+    {:ok, f} = RaftedValue.start_link({:join_existing_consensus_group, [l]} , [persistence_dir: dir_f])
 
     # In case leader hasn't received AppendEntriesResponse from the follower, the leader re-sends part of log entries.
     # (This can happen also in non-persisting setup but is much more frequent in persisting setup as followers must flush log entries before replying to its leader)
@@ -131,7 +131,7 @@ defmodule RaftedValue.PersistenceAndRecoveryTest do
       assert RaftedValue.command(n1, :inc) == {:ok, i}
     end)
     # send snapshot: `n1` => `p1`
-    {:ok, p1} = RaftedValue.start_link({:join_existing_consensus_group, [n1]}, nil, @tmp_dir)
+    {:ok, p1} = RaftedValue.start_link({:join_existing_consensus_group, [n1]}, [persistence_dir: @tmp_dir])
     Enum.each(11 .. 20, fn i ->
       assert RaftedValue.command(n1, :inc) == {:ok, i}
     end)
@@ -139,7 +139,7 @@ defmodule RaftedValue.PersistenceAndRecoveryTest do
     assert :gen_fsm.stop(n1) == :ok
 
     # recover from disk snapshot
-    {:ok, p2} = RaftedValue.start_link({:create_new_consensus_group, @config}, nil, @tmp_dir)
+    {:ok, p2} = RaftedValue.start_link({:create_new_consensus_group, @config}, [persistence_dir: @tmp_dir])
     Enum.each(21 .. 30, fn i ->
       assert RaftedValue.command(p2, :inc) == {:ok, i}
     end)

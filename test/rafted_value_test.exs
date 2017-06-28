@@ -44,15 +44,15 @@ defmodule RaftedValueTest do
     end
   end
 
-  defp add_follower(leader, name \\ nil, persistence_dir \\ nil) do
-    {:ok, follower} = RaftedValue.start_link({:join_existing_consensus_group, [leader]}, name, persistence_dir)
+  defp add_follower(leader, name \\ nil, dir \\ nil) do
+    {:ok, follower} = RaftedValue.start_link({:join_existing_consensus_group, [leader]}, [name: name, persistence_dir: dir])
     wait_until_member_change_completes(leader)
     follower
   end
 
   defp make_cluster(n_follower, config \\ @conf, persist? \\ false) do
     dir = if persist?, do: Path.join(@tmp_dir, "leader"), else: nil
-    {:ok, leader} = RaftedValue.start_link({:create_new_consensus_group, config}, nil, dir)
+    {:ok, leader} = RaftedValue.start_link({:create_new_consensus_group, config}, [persistence_dir: dir])
     followers =
       Enum.map(1 .. n_follower, fn i ->
         dir = if persist?, do: Path.join(@tmp_dir, "follower#{i}"), else: nil
@@ -80,11 +80,11 @@ defmodule RaftedValueTest do
   end
 
   test "should appropriately start/add/remove/stop server" do
-    {:ok, leader} = RaftedValue.start_link({:create_new_consensus_group, @conf}, :foo)
+    {:ok, leader} = RaftedValue.start_link({:create_new_consensus_group, @conf}, [name: :foo])
     assert Process.whereis(:foo) == leader
     follower1 = add_follower(leader, :bar)
     assert Process.whereis(:bar) == follower1
-    {:ok, follower2} = RaftedValue.start_link({:join_existing_consensus_group, [follower1, leader]}, :baz)
+    {:ok, follower2} = RaftedValue.start_link({:join_existing_consensus_group, [follower1, leader]}, [name: :baz])
     wait_until_member_change_completes(leader)
     assert Process.whereis(:baz) == follower2
 

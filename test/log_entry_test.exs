@@ -60,7 +60,7 @@ defmodule RaftedValue.LogEntryTest do
     File.mkdir_p!(dir)
     initial_entry = {0, 1, :leader_elected, self()}
     meta          = %Persistence.SnapshotMetadata{path: Path.join(dir, "snapshot_0_1"), term: 0, last_committed_index: 1, size: 100}
-    persistence1  = Persistence.new_with_disk_snapshot(dir, meta, initial_entry)
+    persistence1  = Persistence.new_with_disk_snapshot(dir, 10, meta, initial_entry)
 
     l            = make_entries_list()
     entries      = Enum.map(1..100, fn _ -> Enum.random(l) end)

@@ -272,7 +272,7 @@ defmodule RaftedValue.Logs do
     end
   end
 
-  @extra_log_entries_kept_in_memory (if Mix.env() == :test, do: 30, else: 100)
+  @extra_log_entries_kept_in_memory (if Mix.env() == :test, do: 50, else: 100)
 
   defunp truncate_old_logs(%__MODULE__{map: map, i_min: i_min, i_committed: i_c} = logs,
                            persistence_or_nil :: nil | Persistence.t) :: t do

@@ -8,42 +8,75 @@ defmodule RaftedValue do
   alias RaftedValue.{TermNumber, Config, Server, Data}
 
   @type consensus_group_info :: {:create_new_consensus_group, Config.t} | {:join_existing_consensus_group, [GenServer.server]}
+  @type option               :: {:name, atom} | {:persistence_dir, Path.t} | {:log_file_expansion_factor, number}
+
+  @default_log_file_expansion_factor 10
 
   @doc """
   Starts a new member of consensus group.
 
   The 1st argument specifies the consensus group to belong to:
 
-  - `{:create_new_consensus_group, Config.t}`: Creates a new consensus group using the given `Config.t`.
-    The group's only member is the newly-created process and it is spawned as the leader.
-  - `{:join_existing_consensus_group, [member]}`: Joins an already running consensus group as a new follower.
+  - `{:create_new_consensus_group, config}`: Creates a new consensus group using the given `RaftedValue.Config.t`.
+    The group's only member is the newly-created process and it immediately becomes a leader.
+  - `{:join_existing_consensus_group, [member]}`: Joins an already running consensus group as a follower.
 
-  The second argument is (if given) used for local name registration.
+  The 2nd argument is a keyword list of options to specify member-specific configurations.
 
-  The third argument (if given) specifies the directory path to store both Raft logs and periodic snapshots.
-  If `nil` is passed the process won't persist its state.
-  The specified directory will be created if not present.
-  Note that it's the caller's responsibility to ensure the followings:
+  - `:name`: An atom for local name registration.
+  - `:persistence_dir`: Directory path in which both Raft logs and periodic snapshots are stored.
+    If not given, the newly-spawned process will run in in-memory mode; it does not persist its state.
+    The specified directory will be created if it does not exist.
+    Note that it's caller's responsibility to ensure that the specified directory is not used by other `RaftedValue` process.
+    See below for details of restoring state from snapshot and logs.
+  - `:log_file_expansion_factor`: A number that adjusts when to make a snapshot file.
+    This does not take effect if `:persistence_dir` is not given.
+    `RaftedValue` keeps track of the file sizes of "currently growing log file" and "previous snapshot file".
+    A new snapshot is created when `log_file_size > previous_snapshot_size * expansion_factor`.
+    Small value means frequent snapshotting, which can result in high overhead.
+    On the other hand larger expansion factor may lead to longer recovery time.
+    Defaults to `#{@default_log_file_expansion_factor}`.
 
-  - The specified directory is not used by other `RaftedValue` process.
-  - The contents of the specified directory is cleaned-up if necessary.
-    RaftedValue never removes latest logs/snapshots on process termination;
-    if you want to start a new RaftedValue process from scratch you have to remove existing files beforehand.
+  For backward compatibility, passing a non-`nil` atom as 2nd argument is interpreted as `[name: name_atom]`.
+  This behavior will be removed in a future release.
+
+  ## Restoring state from snapshot and log files
+
+  `RaftedValue` implements state recovery using log and snapshot files.
+  The recovery procedure is triggered when:
+
+  - A new process is `start_link`ed with `{:create_new_consensus_group, config}` and `:persistence_dir`.
+  - Valid log and snapshot files exist in the given `:persistence_dir`.
+
+  Then the newly-spawned process loads the latest snapshot and log files and forms a new 1-member consensus group
+  with the restored Raft state (except for membership information).
+  When restoring from snapshot and logs, `config` passed in the 1st argument is neglected in favor of configurations in the snapshot and logs.
+
+  If you don't want to restore from snapshot and log files (i.e. want to start a consensus group from scratch),
+  then you must clean up the directory before calling `start_link/2`.
   """
-  defun start_link(info :: consensus_group_info, name_or_nil :: g[atom] \\ nil, persistence_dir :: nil | Path.t \\ nil) :: GenServer.on_start do
+  defun start_link(info :: consensus_group_info, options :: [option] \\ []) :: GenServer.on_start do
     case info do
       {:create_new_consensus_group   , %Config{}    }                             -> :ok
       {:join_existing_consensus_group, known_members} when is_list(known_members) -> :ok
       # raise otherwise
     end
-    start_link_impl(info, name_or_nil, persistence_dir)
+    start_link_impl(info, normalize_options(options))
   end
 
-  defp start_link_impl(info, name_or_nil, persistence_dir) do
-    init_arg = {info, persistence_dir}
-    case name_or_nil do
-      nil  -> :gen_fsm.start_link(                Server, init_arg, [])
-      name -> :gen_fsm.start_link({:local, name}, Server, init_arg, [])
+  defp normalize_options(options) do
+    case options do
+      nil -> []
+      name when is_atom(name) -> [name: name]
+      list when is_list(list) -> list
+    end
+    |> Keyword.put_new(:log_file_expansion_factor, @default_log_file_expansion_factor)
+  end
+
+  defp start_link_impl(info, options) do
+    case Keyword.pop(options, :name) do
+      {nil , options2} -> :gen_fsm.start_link(                Server, {info, options2}, [])
+      {name, options2} -> :gen_fsm.start_link({:local, name}, Server, {info, options2}, [])
     end
   end
 
@@ -67,7 +100,8 @@ defmodule RaftedValue do
     This enables the leader to skip message round trips during processing read-only query.
     Defaults to the value of `election_timeout` (i.e. no lease time, disabling this clock-based optimization).
   - `max_retained_command_results`: Number of command results to be cached,
-    in order to prevent doubly applying the same command. Defaults to `100`.
+    in order not to doubly apply the same command due to client retries.
+    Defaults to `100`.
   """
   defun make_config(data_module :: g[atom], opts :: Keyword.t(any) \\ []) :: Config.t do
     election_timeout = Keyword.get(opts, :election_timeout, 1000)
