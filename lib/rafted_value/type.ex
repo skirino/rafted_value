@@ -8,7 +8,6 @@ defmodule RaftedValue.Config do
     heartbeat_timeout:                   Croma.PosInteger,
     election_timeout:                    Croma.PosInteger, # minimum value; actual timeout is randomly picked from `election_timeout .. 2 * election_timeout`
     election_timeout_clock_drift_margin: Croma.PosInteger,
-    max_retained_committed_logs:         Croma.PosInteger, # this field is obsolete and has no effect; just kept for backward compatibility
     max_retained_command_results:        Croma.PosInteger,
   ]
 end
@@ -39,7 +38,7 @@ defmodule RaftedValue.Monotonic do
     _                    -> {:error, {:invalid_value, [__MODULE__]}}
   end
 
-  defun millis :: t do
+  defun millis() :: t do
     System.monotonic_time(:milliseconds)
   end
 end

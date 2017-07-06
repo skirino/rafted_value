@@ -38,7 +38,7 @@ defmodule RaftedValue.LogEntry do
   defunpt extract_from_binary(bin :: binary) :: nil | {t, rest :: binary} do
     with <<term :: size(64), index :: size(64), type_tag :: size(8), size :: size(64)>> <> rest1 <- bin,
          {:ok, entry_type} = tag_to_entry_type(type_tag),
-         <<others_bin :: binary-size(size) >> <> rest2 <- rest1 do
+         <<others_bin :: binary-size(size)>> <> rest2 <- rest1 do
       {{term, index, entry_type, :erlang.binary_to_term(others_bin)}, rest2}
     else
       _ -> nil # insufficient input, can be retried with subsequent binary data
