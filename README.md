@@ -19,6 +19,7 @@
 
 ## Notes on backward compatibility
 
+- In-disk log format was slightly changed in `0.3.0` from that of `0.2.x`.
 - Users of `<= 0.1.8` should upgrade to `0.1.10` before upgrading to `>= 0.2.0`.
     - RPC protocol of `<= 0.1.8` and that of `>= 0.2.0` are slightly incompatible
     - Version `0.1.10` should be able to interact with both `<= 0.1.8` and `>= 0.2.0`
