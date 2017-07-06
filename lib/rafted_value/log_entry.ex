@@ -32,14 +32,19 @@ defmodule RaftedValue.LogEntry do
 
   defun to_binary({term, index, entry_type, others} :: t) :: binary do
     bin = :erlang.term_to_binary(others)
-    <<term :: size(64), index :: size(64), entry_type_to_tag(entry_type) :: size(8), byte_size(bin) :: size(64), bin :: binary>>
+    size = byte_size(bin)
+    <<term :: size(64), index :: size(64), entry_type_to_tag(entry_type) :: size(8), size :: size(64), bin :: binary, size :: size(64)>>
   end
 
   defunpt extract_from_binary(bin :: binary) :: nil | {t, rest :: binary} do
-    with <<term :: size(64), index :: size(64), type_tag :: size(8), size :: size(64)>> <> rest1 <- bin,
+    with <<term :: size(64), index :: size(64), type_tag :: size(8), size1 :: size(64)>> <> rest1 <- bin,
          {:ok, entry_type} = tag_to_entry_type(type_tag),
-         <<others_bin :: binary-size(size)>> <> rest2 <- rest1 do
-      {{term, index, entry_type, :erlang.binary_to_term(others_bin)}, rest2}
+         <<others_bin :: binary-size(size1), size2 :: size(64)>> <> rest2 <- rest1 do
+      if size1 == size2 do
+        {{term, index, entry_type, :erlang.binary_to_term(others_bin)}, rest2}
+      else
+        raise "redundant size information not matched"
+      end
     else
       _ -> nil # insufficient input, can be retried with subsequent binary data
     end

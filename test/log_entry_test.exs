@@ -40,16 +40,18 @@ defmodule RaftedValue.LogEntryTest do
 
   test "extract_from_binary/1 should report error on failure" do
     bin = :erlang.term_to_binary(self())
+    size = byte_size(bin)
     [
       <<>>,
-      <<1 :: size(64), 2 :: size(64), 3 :: size(8), byte_size(bin) + 10 :: size(64), bin :: binary>>, # insufficient data
+      <<1 :: size(64), 2 :: size(64), 3 :: size(8), size + 10 :: size(64), bin :: binary, size + 10 :: size(64)>>, # insufficient data
     ] |> Enum.each(fn b ->
       assert LogEntry.extract_from_binary(b) == nil
     end)
 
     [
-      <<1 :: size(64), 2 :: size(64), 6 :: size(8), byte_size(bin)       :: size(64), bin :: binary>>, # invalid tag
-      <<1 :: size(64), 2 :: size(64), 3 :: size(8), byte_size("invalid") :: size(64), "invalid">>    , # :erlang.binary_to_term/1 fails
+      <<1 :: size(64), 2 :: size(64), 6 :: size(8), size :: size(64), bin :: binary, size     :: size(64)>>, # invalid tag
+      <<1 :: size(64), 2 :: size(64), 3 :: size(8), 7    :: size(64), "invalid"    , 7        :: size(64)>>, # :erlang.binary_to_term/1 fails
+      <<1 :: size(64), 2 :: size(64), 3 :: size(8), size :: size(64), bin :: binary, size + 1 :: size(64)>>, # sizes not match
     ] |> Enum.each(fn b ->
       catch_error LogEntry.extract_from_binary(b)
     end)
