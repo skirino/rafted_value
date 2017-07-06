@@ -5,7 +5,7 @@ defmodule RaftedValue do
   Public interface functions of `RaftedValue` package.
   """
 
-  alias RaftedValue.{TermNumber, Config, Server, Data}
+  alias RaftedValue.{TermNumber, Config, Server, Data, LogIndex, Persistence}
 
   @type consensus_group_info :: {:create_new_consensus_group, Config.t} | {:join_existing_consensus_group, [GenServer.server]}
   @type option               :: {:name, atom} | {:persistence_dir, Path.t} | {:log_file_expansion_factor, number}
@@ -219,5 +219,12 @@ defmodule RaftedValue do
   """
   defun status(server :: GenServer.server, timeout :: timeout \\ 5000) :: status_result do
     :gen_fsm.sync_send_all_state_event(server, :status, timeout)
+  end
+
+  @doc """
+  Obtains last log index from the log files stored in `dir`.
+  """
+  defun read_last_log_index(dir :: Path.t) :: nil | LogIndex.t do
+    Persistence.read_last_log_index(dir)
   end
 end

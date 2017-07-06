@@ -120,10 +120,7 @@ defmodule RaftedValue.Persistence do
 
   defunp partition_obsolete_and_live_log_files(dir :: Path.t, i_committed :: LogIndex.t) :: {[{Path.t, LogIndex.t}], [{Path.t, LogIndex.t}]} do
     Path.wildcard(Path.join(dir, "log_*"))
-    |> Enum.map(fn path ->
-      ["log", index_first] = Path.basename(path) |> String.split("_")
-      {String.to_integer(index_first), path}
-    end)
+    |> Enum.map(fn path -> {extract_first_log_index_from_path(path), path} end)
     |> Enum.sort()
     |> Enum.chunk(2, 1, [nil])
     |> Enum.map(fn
@@ -131,5 +128,19 @@ defmodule RaftedValue.Persistence do
       [{_, path}, nil        ] -> {path, :infinity } # atom is larger than any integers
     end)
     |> Enum.partition(fn {_, i} -> i < i_committed end)
+  end
+
+  defun read_last_log_index(dir :: Path.t) :: nil | LogIndex.t do
+    case Path.wildcard(Path.join(dir, "log_*")) do
+      []    -> nil
+      paths ->
+        latest_log_path = Enum.max_by(paths, &extract_first_log_index_from_path/1)
+        LogEntry.read_last_entry_index(latest_log_path)
+    end
+  end
+
+  defunp extract_first_log_index_from_path(path :: Path.t) :: LogIndex.t do
+    ["log", index_first] = Path.basename(path) |> String.split("_")
+    String.to_integer(index_first)
   end
 end

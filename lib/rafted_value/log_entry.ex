@@ -43,7 +43,7 @@ defmodule RaftedValue.LogEntry do
       if size1 == size2 do
         {{term, index, entry_type, :erlang.binary_to_term(others_bin)}, rest2}
       else
-        raise "redundant size information not matched"
+        raise "redundant size information in log entry not matched"
       end
     else
       _ -> nil # insufficient input, can be retried with subsequent binary data
@@ -66,5 +66,30 @@ defmodule RaftedValue.LogEntry do
     |> Stream.transform(<<>>, fn(bin, carryover) ->
       extract_multiple_from_binary(carryover <> bin)
     end)
+  end
+
+  defun read_last_entry_index(log_path :: Path.t) :: nil | LogIndex.t do
+    case :file.open(log_path, [:raw, :binary]) do
+      {:ok, f}    -> read_last_entry_index_impl(f, File.stat!(log_path).size)
+      {:error, _} -> nil
+    end
+  end
+
+  defp read_last_entry_index_impl(f, size) do
+    if size < 8 do
+      nil
+    else
+      {:ok, <<binsize1 :: size(64)>>} = :file.pread(f, size - 8, 8)
+      last_entry_start_offset = size - binsize1 - 33 # (term: 8, index: 8, tag: 1, size1: 8, size2: 8)
+      if last_entry_start_offset < 0 do
+        nil
+      else
+        {:ok, <<_term :: size(64), index :: size(64), type_tag :: size(8), binsize2 :: size(64)>>} = :file.pread(f, last_entry_start_offset, 25)
+        case tag_to_entry_type(type_tag) do # minimal sanity checking
+          {:ok, _} when binsize2 == binsize1 -> index
+          _                                  -> nil
+        end
+      end
+    end
   end
 end
