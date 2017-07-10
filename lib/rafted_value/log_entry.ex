@@ -3,31 +3,34 @@ alias Croma.Result, as: R
 
 defmodule RaftedValue.LogEntry do
   alias RaftedValue.{TermNumber, LogIndex, Config}
-  @type t :: {TermNumber.t, LogIndex.t, :command        , {GenServer.from, Data.command_arg, reference}}
-           | {TermNumber.t, LogIndex.t, :query          , {GenServer.from, Data.query_arg}}
-           | {TermNumber.t, LogIndex.t, :change_config  , Config.t}
-           | {TermNumber.t, LogIndex.t, :leader_elected , pid}
-           | {TermNumber.t, LogIndex.t, :add_follower   , pid}
-           | {TermNumber.t, LogIndex.t, :remove_follower, pid}
+  @type t :: {TermNumber.t, LogIndex.t, :command              , {GenServer.from, Data.command_arg, reference}}
+           | {TermNumber.t, LogIndex.t, :query                , {GenServer.from, Data.query_arg}}
+           | {TermNumber.t, LogIndex.t, :change_config        , Config.t}
+           | {TermNumber.t, LogIndex.t, :leader_elected       , pid}
+           | {TermNumber.t, LogIndex.t, :add_follower         , pid}
+           | {TermNumber.t, LogIndex.t, :remove_follower      , pid}
+           | {TermNumber.t, LogIndex.t, :restore_from_snapshot, pid}
 
   defun validate(v :: any) :: R.t(t) do
     {_, _, _, _} = t -> {:ok, t}
     _                -> {:error, {:invalid_value, [__MODULE__]}}
   end
 
-  defp entry_type_to_tag(:command        ), do: 0
-  defp entry_type_to_tag(:query          ), do: 1
-  defp entry_type_to_tag(:change_config  ), do: 2
-  defp entry_type_to_tag(:leader_elected ), do: 3
-  defp entry_type_to_tag(:add_follower   ), do: 4
-  defp entry_type_to_tag(:remove_follower), do: 5
+  defp entry_type_to_tag(:command              ), do: 0
+  defp entry_type_to_tag(:query                ), do: 1
+  defp entry_type_to_tag(:change_config        ), do: 2
+  defp entry_type_to_tag(:leader_elected       ), do: 3
+  defp entry_type_to_tag(:add_follower         ), do: 4
+  defp entry_type_to_tag(:remove_follower      ), do: 5
+  defp entry_type_to_tag(:restore_from_snapshot), do: 6
 
-  defp tag_to_entry_type(0), do: {:ok, :command        }
-  defp tag_to_entry_type(1), do: {:ok, :query          }
-  defp tag_to_entry_type(2), do: {:ok, :change_config  }
-  defp tag_to_entry_type(3), do: {:ok, :leader_elected }
-  defp tag_to_entry_type(4), do: {:ok, :add_follower   }
-  defp tag_to_entry_type(5), do: {:ok, :remove_follower}
+  defp tag_to_entry_type(0), do: {:ok, :command              }
+  defp tag_to_entry_type(1), do: {:ok, :query                }
+  defp tag_to_entry_type(2), do: {:ok, :change_config        }
+  defp tag_to_entry_type(3), do: {:ok, :leader_elected       }
+  defp tag_to_entry_type(4), do: {:ok, :add_follower         }
+  defp tag_to_entry_type(5), do: {:ok, :remove_follower      }
+  defp tag_to_entry_type(6), do: {:ok, :restore_from_snapshot}
   defp tag_to_entry_type(_), do: :error
 
   defun to_binary({term, index, entry_type, others} :: t) :: binary do

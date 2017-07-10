@@ -18,12 +18,13 @@ defmodule RaftedValue.LogEntryTest do
 
   defp make_entries_list() do
     [
-      {1, 2, :command        , {make_gen_server_from(), :some_command_arg, make_ref()}},
-      {1, 2, :query          , {make_gen_server_from(), :some_query_arg}},
-      {1, 2, :change_config  , RaftedValue.make_config(__MODULE__)},
-      {1, 2, :leader_elected , self()},
-      {1, 2, :add_follower   , self()},
-      {1, 2, :remove_follower, self()},
+      {1, 2, :command              , {make_gen_server_from(), :some_command_arg, make_ref()}},
+      {1, 2, :query                , {make_gen_server_from(), :some_query_arg}},
+      {1, 2, :change_config        , RaftedValue.make_config(__MODULE__)},
+      {1, 2, :leader_elected       , self()},
+      {1, 2, :add_follower         , self()},
+      {1, 2, :remove_follower      , self()},
+      {1, 2, :restore_from_snapshot, self()},
     ]
   end
 
@@ -50,7 +51,7 @@ defmodule RaftedValue.LogEntryTest do
     end)
 
     [
-      <<1 :: size(64), 2 :: size(64), 6 :: size(8), size :: size(64), bin :: binary, size     :: size(64)>>, # invalid tag
+      <<1 :: size(64), 2 :: size(64), 7 :: size(8), size :: size(64), bin :: binary, size     :: size(64)>>, # invalid tag
       <<1 :: size(64), 2 :: size(64), 3 :: size(8), 7    :: size(64), "invalid"    , 7        :: size(64)>>, # :erlang.binary_to_term/1 fails
       <<1 :: size(64), 2 :: size(64), 3 :: size(8), size :: size(64), bin :: binary, size + 1 :: size(64)>>, # sizes not match
     ] |> Enum.each(fn b ->
@@ -100,7 +101,7 @@ defmodule RaftedValue.LogEntryTest do
     [
       "",
       <<"abcdef", 1000 :: size(64)>>,
-      <<1 :: size(64), 2 :: size(64), 6 :: size(8), size     :: size(64), bin :: binary, size :: size(64)>>, # invalid tag
+      <<1 :: size(64), 2 :: size(64), 7 :: size(8), size     :: size(64), bin :: binary, size :: size(64)>>, # invalid tag
       <<1 :: size(64), 2 :: size(64), 3 :: size(8), size + 1 :: size(64), bin :: binary, size :: size(64)>>, # sizes not match
     ] |> Enum.each(fn content ->
       path = Path.join(@dir, "log")

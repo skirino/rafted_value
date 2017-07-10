@@ -12,12 +12,12 @@ defmodule RaftedValue.Members do
     pending_leader_change:         TG.nilable(Croma.Pid),
   ]
 
-  defun new_for_lonely_leader :: t do
-    %__MODULE__{leader: self(), all: PidSet.put(PidSet.new, self())}
+  defun new_for_lonely_leader() :: t do
+    %__MODULE__{leader: self(), all: PidSet.put(PidSet.new(), self())}
   end
 
   defun other_members_list(%__MODULE__{all: all}) :: [pid] do
-    PidSet.delete(all, self()) |> PidSet.to_list
+    PidSet.delete(all, self()) |> PidSet.to_list()
   end
 
   defun put_leader(m :: t, leader_or_nil :: nil | pid) :: t do
@@ -32,7 +32,7 @@ defmodule RaftedValue.Members do
         if PidSet.member?(all, new_follower) do
           {:error, :already_joined}
         else
-          %__MODULE__{m | all: PidSet.put(all, new_follower), uncommitted_membership_change: entry} |> R.pure
+          %__MODULE__{m | all: PidSet.put(all, new_follower), uncommitted_membership_change: entry} |> R.pure()
         end
       end)
     end)
@@ -55,9 +55,9 @@ defmodule RaftedValue.Members do
                                new_leader :: nil | pid) :: R.t(t) do
     reject_if_membership_changing(m, fn ->
       cond do
-        is_nil(new_leader)              -> %__MODULE__{m | pending_leader_change: nil} |> R.pure
+        is_nil(new_leader)              -> %__MODULE__{m | pending_leader_change: nil} |> R.pure()
         new_leader == self()            -> {:error, :already_leader}
-        PidSet.member?(all, new_leader) -> %__MODULE__{m | pending_leader_change: new_leader} |> R.pure
+        PidSet.member?(all, new_leader) -> %__MODULE__{m | pending_leader_change: new_leader} |> R.pure()
         true                            -> {:error, :not_member}
       end
     end)

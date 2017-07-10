@@ -99,7 +99,7 @@ defmodule RaftedValue.Logs do
                              current_term :: TermNumber.t,
                              members_set  :: PidSet.t,
                              persistence  :: nil | Persistence.t) :: t do
-    uncommitted_entries_reversed = slice_entries(map, i_c + 1, i_max) |> Enum.reverse
+    uncommitted_entries_reversed = slice_entries(map, i_c + 1, i_max) |> Enum.reverse()
     last_commitable_entry_tuple =
       Stream.scan(uncommitted_entries_reversed, {nil, nil, members_set}, fn(entry, {_, _, members_for_this_entry}) ->
         # Consensus group members change on :add_follower/:remove_follower log entries;
@@ -171,6 +171,11 @@ defmodule RaftedValue.Logs do
     |> add_entry(persistence, fn i -> {term, i, :leader_elected, self()} end)
   end
 
+  defun add_entry_on_restored_from_snapshot(logs :: t, term :: TermNumber.t) :: {t, LogEntry.t} do
+    # We don't have to truncate the log entries here since it's right after recovery from disk snapshot
+    add_entry(logs, nil, fn i -> {term, i, :restore_from_snapshot, self()} end)
+  end
+
   defun add_entry_on_add_follower(%__MODULE__{i_max: i_max, followers: followers} = logs,
                                   term         :: TermNumber.t,
                                   new_follower :: pid,
@@ -201,7 +206,7 @@ defmodule RaftedValue.Logs do
   end
 
   defun append_entries(%__MODULE__{map: map, i_max: i_max, i_committed: old_i_committed} = logs,
-                       %Members{all: members_set} = members,
+                       members         :: Members.t,
                        entries         :: [LogEntry.t],
                        i_leader_commit :: LogIndex.t,
                        persistence     :: nil | Persistence.t) :: {t, Members.t, [LogEntry.t], [LogEntry.t]} do
@@ -212,24 +217,13 @@ defmodule RaftedValue.Logs do
           _nil_or_different -> {Map.put(m, i, e), [e | acc]}
         end
       end)
-    new_i_max        = if Enum.empty?(entries), do: i_max, else: max(i_max, elem(List.last(entries), 1))
-    new_i_committed  = max(old_i_committed, i_leader_commit)
-    new_logs         = %__MODULE__{logs | map: new_map, i_max: new_i_max, i_committed: new_i_committed} |> truncate_old_logs(persistence)
-    entries_to_apply = slice_entries(new_map, old_i_committed + 1, new_i_committed)
-
-    new_members_set = Enum.reduce(entries, members_set, &change_members/2)
-    last_member_change_entry =
-      slice_entries(new_map, i_max + 1, new_i_max)
-      |> Enum.reverse()
-      |> Enum.find(fn {_, _, atom, _} -> atom in [:add_follower, :remove_follower] end)
-    new_members =
-      if last_member_change_entry do
-        %Members{members | all: new_members_set, uncommitted_membership_change: last_member_change_entry}
-      else
-        %Members{members | all: new_members_set}
-      end
-
-    {new_logs, new_members, entries_to_apply, Enum.reverse(entries_to_persist_reversed)}
+    new_i_max          = if Enum.empty?(entries), do: i_max, else: max(i_max, elem(List.last(entries), 1))
+    new_i_committed    = max(old_i_committed, i_leader_commit)
+    new_logs           = %__MODULE__{logs | map: new_map, i_max: new_i_max, i_committed: new_i_committed} |> truncate_old_logs(persistence)
+    entries_to_apply   = slice_entries(new_map, old_i_committed + 1, new_i_committed)
+    entries_to_persist = Enum.reverse(entries_to_persist_reversed)
+    new_members        = Enum.reduce(entries_to_persist, members, &change_members/2)
+    {new_logs, new_members, entries_to_apply, entries_to_persist}
   end
 
   defun candidate_log_up_to_date?(%__MODULE__{map: m, i_max: i_max}, candidate_log_info :: LogInfo.t) :: boolean do
@@ -248,15 +242,17 @@ defmodule RaftedValue.Logs do
     Map.fetch!(m, i_c)
   end
 
-  defunp change_members(entry :: LogEntry.t, members :: PidSet.t) :: PidSet.t do
+  defunp change_members(entry :: LogEntry.t, %Members{all: set} = members) :: Members.t do
     case entry do
-      {_t, _i, :add_follower   , pid} -> PidSet.put(members, pid)
-      {_t, _i, :remove_follower, pid} -> PidSet.delete(members, pid)
-      _                               -> members
+      {_t, _i, :add_follower         , pid} -> %Members{members | all: PidSet.put(set, pid)         , uncommitted_membership_change: entry}
+      {_t, _i, :remove_follower      , pid} -> %Members{members | all: PidSet.delete(set, pid)      , uncommitted_membership_change: entry}
+      {_t, _i, :restore_from_snapshot, pid} -> %Members{members | all: PidSet.put(PidSet.new(), pid), uncommitted_membership_change: nil  }
+      _                                     -> members
     end
   end
 
   defunp inverse_change_members(entry :: LogEntry.t, members :: PidSet.t) :: PidSet.t do
+    # We don't have to take `:restore_from_snapshot` into consideration here because it is immediately committed by the lonely leader
     case entry do
       {_t, _i, :add_follower   , pid} -> PidSet.delete(members, pid)
       {_t, _i, :remove_follower, pid} -> PidSet.put(members, pid)

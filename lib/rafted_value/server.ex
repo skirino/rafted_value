@@ -136,11 +136,11 @@ defmodule RaftedValue.Server do
             members                   = Members.new_for_lonely_leader()
             snapshot                  = %Snapshot{snapshot_from_disk | members: members}
             logs1                     = Logs.new_for_lonely_leader(snapshot.last_committed_entry, log_entries)
-            {logs2, entry_elected}    = Logs.add_entry_on_elected_leader(logs1, members, snapshot.term, nil)
-            persistence               = Persistence.new_with_disk_snapshot(dir, log_expansion_factor, snapshot_meta, entry_elected)
+            {logs2, entry_restore}    = Logs.add_entry_on_restored_from_snapshot(logs1, snapshot.term)
+            persistence               = Persistence.new_with_disk_snapshot(dir, log_expansion_factor, snapshot_meta, entry_restore)
             {logs3, entries_to_apply} = Logs.commit_to_latest(logs2, persistence)
             state                     = build_state_from_snapshot(snapshot, logs3, persistence)
-            Enum.reduce(entries_to_apply, state, &leader_apply_committed_log_entry_without_membership_change/2) # `entry_elected` results in a no-op and thus neglected
+            Enum.reduce(entries_to_apply, state, &leader_apply_committed_log_entry_without_membership_change/2) # `entry_restore` results in a no-op and thus neglected
         end
     end
   end
@@ -431,7 +431,8 @@ defmodule RaftedValue.Server do
 
   defp become_candidate_and_start_new_election(%State{members: members, current_term: term, election: election, config: config} = state,
                                                replacing_leader? \\ false) do
-    if PidSet.size(members.all) == 1 do
+    members_set = members.all
+    if PidSet.size(members_set) == 1 and PidSet.member?(members_set, self()) do
       # 1-member consensus group must be handled separately.
       # As `self()` already has vote from majority (i.e. itself), no election is needed;
       # skip candidate state and directly become a leader.
@@ -713,27 +714,28 @@ defmodule RaftedValue.Server do
         send_event(state, follower_pid, :remove_follower_completed) # don't use :gen_fsm.stop in order to stop `follower_pid` only when it's actually a follower
         hook.on_follower_removed(data, follower_pid)
         %State{state | members: Members.membership_change_committed(members, index)}
+      {_term, _index, :restore_from_snapshot, _pid} ->
+        state
     end
   end
 
   defunp leader_apply_committed_log_entry_without_membership_change(entry :: LogEntry.t, %State{} = state) :: State.t do
     # leader is recovering from snapshot & log in disk; there's currently no other member and thus membership-change-related log entries are neglected here
     case entry do
-      {_term, _index, :command      , tuple     } -> run_command(state, tuple, true)
-      {_term, _index, :query        , tuple     } -> run_query(state, tuple); state
-      {_term, _index, :change_config, new_config} -> %State{state | config: new_config}
-      {_term, _index, _add_or_remove, _         } -> state
+      {_term, _index, :command                 , tuple     } -> run_command(state, tuple, true)
+      {_term, _index, :query                   , tuple     } -> run_query(state, tuple); state
+      {_term, _index, :change_config           , new_config} -> %State{state | config: new_config}
+      {_term, _index, _add_or_remove_or_restore, _         } -> state
     end
   end
 
   defunp nonleader_apply_committed_log_entry(entry :: LogEntry.t, %State{members: members} = state) :: State.t do
     case entry do
-      {_term, _index, :command        , tuple        } -> run_command(state, tuple, false)
-      {_term, _index, :query          , _tuple       } -> state
-      {_term, _index, :change_config  , new_config   } -> %State{state | config: new_config}
-      {_term, _index, :leader_elected , _leader_pid  } -> state
-      {_term, index , :add_follower   , _follower_pid} -> %State{state | members: Members.membership_change_committed(members, index)}
-      {_term, index , :remove_follower, _follower_pid} -> %State{state | members: Members.membership_change_committed(members, index)}
+      {_term, _index, :command                    , tuple        } -> run_command(state, tuple, false)
+      {_term, _index, :change_config              , new_config   } -> %State{state | config: new_config}
+      {_term, index , :add_follower               , _follower_pid} -> %State{state | members: Members.membership_change_committed(members, index)}
+      {_term, index , :remove_follower            , _follower_pid} -> %State{state | members: Members.membership_change_committed(members, index)}
+      {_term, _index, _query_or_elected_or_restore, _            } -> state
     end
   end
 

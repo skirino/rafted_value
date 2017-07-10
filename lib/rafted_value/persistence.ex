@@ -29,9 +29,9 @@ defmodule RaftedValue.Persistence do
     |> write_log_entries([entry_elected])
   end
 
-  defun new_with_disk_snapshot(dir :: Path.t, factor :: number, meta :: SnapshotMetadata.t, {_, index_first, _, _} = entry_elected :: LogEntry.t) :: t do
+  defun new_with_disk_snapshot(dir :: Path.t, factor :: number, meta :: SnapshotMetadata.t, {_, index_first, _, _} = entry_restore :: LogEntry.t) :: t do
     %__MODULE__{dir: dir, log_fd: open_log_file(dir, index_first), log_size_written: 0, log_expansion_factor: factor, latest_snapshot_metadata: meta}
-    |> write_log_entries([entry_elected])
+    |> write_log_entries([entry_restore])
   end
 
   defun new_with_snapshot_sent_from_leader(dir :: Path.t, factor :: number, snapshot :: Snapshot.t) :: t do

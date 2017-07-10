@@ -125,6 +125,24 @@ defmodule RaftedValue.PersistenceAndRecoveryTest do
     assert :gen_fsm.stop(l) == :ok
   end
 
+  test "follower should reset its members field when recovery log entry is found" do
+    dir_l = Path.join(@tmp_dir, "l")
+    dir_f = Path.join(@tmp_dir, "f")
+    {:ok, l1} = RaftedValue.start_link({:create_new_consensus_group, @config}, [persistence_dir: dir_l])
+    {:ok, f1} = RaftedValue.start_link({:join_existing_consensus_group, [l1]} , [persistence_dir: dir_f])
+    assert Enum.sort(RaftedValue.status(l1).members) == Enum.sort([l1, f1])
+    assert Enum.sort(RaftedValue.status(f1).members) == Enum.sort([l1, f1])
+    assert :gen_fsm.stop(f1) == :ok
+    assert :gen_fsm.stop(l1) == :ok
+
+    {:ok, l2} = RaftedValue.start_link({:create_new_consensus_group, @config}, [persistence_dir: dir_l])
+    {:ok, f2} = RaftedValue.start_link({:join_existing_consensus_group, [l2]}, [persistence_dir: dir_f])
+    assert Enum.sort(RaftedValue.status(l2).members) == Enum.sort([l2, f2])
+    assert Enum.sort(RaftedValue.status(f2).members) == Enum.sort([l2, f2])
+    assert :gen_fsm.stop(f2) == :ok
+    assert :gen_fsm.stop(l2) == :ok
+  end
+
   test "non-persisting and persisting members can interchange snapshots with each other" do
     {:ok, n1} = RaftedValue.start_link({:create_new_consensus_group, @config})
     Enum.each(0 .. 10, fn i ->
