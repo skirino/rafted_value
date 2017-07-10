@@ -136,7 +136,7 @@ defmodule RaftedValue.Server do
             members                   = Members.new_for_lonely_leader()
             snapshot                  = %Snapshot{snapshot_from_disk | members: members}
             logs1                     = Logs.new_for_lonely_leader(snapshot.last_committed_entry, log_entries)
-            {logs2, entry_restore}    = Logs.add_entry_on_restored_from_snapshot(logs1, snapshot.term)
+            {logs2, entry_restore}    = Logs.add_entry_on_restored_from_files(logs1, snapshot.term)
             persistence               = Persistence.new_with_disk_snapshot(dir, log_expansion_factor, snapshot_meta, entry_restore)
             {logs3, entries_to_apply} = Logs.commit_to_latest(logs2, persistence)
             state                     = build_state_from_snapshot(snapshot, logs3, persistence)
@@ -714,7 +714,8 @@ defmodule RaftedValue.Server do
         send_event(state, follower_pid, :remove_follower_completed) # don't use :gen_fsm.stop in order to stop `follower_pid` only when it's actually a follower
         hook.on_follower_removed(data, follower_pid)
         %State{state | members: Members.membership_change_committed(members, index)}
-      {_term, _index, :restore_from_snapshot, _pid} ->
+      {_term, _index, :restore_from_files, leader_pid} ->
+        if leader_pid == self(), do: hook.on_restored_from_files(data)
         state
     end
   end

@@ -171,9 +171,9 @@ defmodule RaftedValue.Logs do
     |> add_entry(persistence, fn i -> {term, i, :leader_elected, self()} end)
   end
 
-  defun add_entry_on_restored_from_snapshot(logs :: t, term :: TermNumber.t) :: {t, LogEntry.t} do
+  defun add_entry_on_restored_from_files(logs :: t, term :: TermNumber.t) :: {t, LogEntry.t} do
     # We don't have to truncate the log entries here since it's right after recovery from disk snapshot
-    add_entry(logs, nil, fn i -> {term, i, :restore_from_snapshot, self()} end)
+    add_entry(logs, nil, fn i -> {term, i, :restore_from_files, self()} end)
   end
 
   defun add_entry_on_add_follower(%__MODULE__{i_max: i_max, followers: followers} = logs,
@@ -244,15 +244,15 @@ defmodule RaftedValue.Logs do
 
   defunp change_members(entry :: LogEntry.t, %Members{all: set} = members) :: Members.t do
     case entry do
-      {_t, _i, :add_follower         , pid} -> %Members{members | all: PidSet.put(set, pid)         , uncommitted_membership_change: entry}
-      {_t, _i, :remove_follower      , pid} -> %Members{members | all: PidSet.delete(set, pid)      , uncommitted_membership_change: entry}
-      {_t, _i, :restore_from_snapshot, pid} -> %Members{members | all: PidSet.put(PidSet.new(), pid), uncommitted_membership_change: nil  }
-      _                                     -> members
+      {_t, _i, :add_follower      , pid} -> %Members{members | all: PidSet.put(set, pid)         , uncommitted_membership_change: entry}
+      {_t, _i, :remove_follower   , pid} -> %Members{members | all: PidSet.delete(set, pid)      , uncommitted_membership_change: entry}
+      {_t, _i, :restore_from_files, pid} -> %Members{members | all: PidSet.put(PidSet.new(), pid), uncommitted_membership_change: nil  }
+      _                                  -> members
     end
   end
 
   defunp inverse_change_members(entry :: LogEntry.t, members :: PidSet.t) :: PidSet.t do
-    # We don't have to take `:restore_from_snapshot` into consideration here because it is immediately committed by the lonely leader
+    # We don't have to take `:restore_from_files` into consideration here because it is immediately committed by the lonely leader
     case entry do
       {_t, _i, :add_follower   , pid} -> PidSet.delete(members, pid)
       {_t, _i, :remove_follower, pid} -> PidSet.put(members, pid)

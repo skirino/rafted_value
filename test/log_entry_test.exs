@@ -18,13 +18,13 @@ defmodule RaftedValue.LogEntryTest do
 
   defp make_entries_list() do
     [
-      {1, 2, :command              , {make_gen_server_from(), :some_command_arg, make_ref()}},
-      {1, 2, :query                , {make_gen_server_from(), :some_query_arg}},
-      {1, 2, :change_config        , RaftedValue.make_config(__MODULE__)},
-      {1, 2, :leader_elected       , self()},
-      {1, 2, :add_follower         , self()},
-      {1, 2, :remove_follower      , self()},
-      {1, 2, :restore_from_snapshot, self()},
+      {1, 2, :command           , {make_gen_server_from(), :some_command_arg, make_ref()}},
+      {1, 2, :query             , {make_gen_server_from(), :some_query_arg}},
+      {1, 2, :change_config     , RaftedValue.make_config(__MODULE__)},
+      {1, 2, :leader_elected    , self()},
+      {1, 2, :add_follower      , self()},
+      {1, 2, :remove_follower   , self()},
+      {1, 2, :restore_from_files, self()},
     ]
   end
 

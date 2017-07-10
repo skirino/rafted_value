@@ -699,6 +699,7 @@ defmodule RaftedValueTest do
     def on_follower_added(_, pid)       , do: send(:test_runner, {:follower_added, pid})
     def on_follower_removed(_, pid)     , do: send(:test_runner, {:follower_removed, pid})
     def on_elected(_)                   , do: send(:test_runner, {:elected, self()})
+    def on_restored_from_files(_)       , do: send(:test_runner, {:restored_from_files, self()})
   end
 
   defp receive_leader_elected_message() do
@@ -842,7 +843,7 @@ defmodule RaftedValueTest do
         CommunicationWithNetsplit.set([])
         working_after_heal = c3.working ++ c3.isolated
         send(client_pid, {:members, working_after_heal})
-        leader_after_heal = receive_leader_elected_message() || c3.current_leader
+        leader_after_heal = receive_leader_elected_message() || receive_leader_elected_message() || c3.current_leader
         c4 = %{c3 | working: working_after_heal, isolated: [], current_leader: leader_after_heal}
         c5 = Enum.reduce(c4.killed, c4, fn(_, c) -> op_purge_killed_member(c) end)
         assert_leader_status(leader_after_heal, c5.working, [])

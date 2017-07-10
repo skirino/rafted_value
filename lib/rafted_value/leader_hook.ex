@@ -40,6 +40,11 @@ defmodule RaftedValue.LeaderHook do
   Hook to be called when a new leader is elected in a consensus group.
   """
   @callback on_elected(Data.data) :: neglected
+
+  @doc """
+  Hook to be called when a new leader restores its state from snapshot & log files.
+  """
+  @callback on_restored_from_files(Data.data) :: neglected
 end
 
 defmodule RaftedValue.LeaderHook.NoOp do
@@ -49,4 +54,5 @@ defmodule RaftedValue.LeaderHook.NoOp do
   def on_follower_added(_, _), do: nil
   def on_follower_removed(_, _), do: nil
   def on_elected(_), do: nil
+  def on_restored_from_files(_), do: nil
 end
