@@ -42,3 +42,7 @@ defmodule RaftedValue.Monotonic do
     System.monotonic_time(:milliseconds)
   end
 end
+
+defmodule RaftedValue.AddFollowerError do
+  defexception [:message, :pid]
+end

@@ -6,10 +6,10 @@ defmodule RaftedValue.Mixfile do
   def project() do
     [
       app:             :rafted_value,
-      version:         "0.3.1",
+      version:         "0.3.2",
       elixir:          "~> 1.3",
-      build_embedded:  Mix.env == :prod,
-      start_permanent: Mix.env == :prod,
+      build_embedded:  Mix.env() == :prod,
+      start_permanent: Mix.env() == :prod,
       deps:            deps(),
       description:     "Replicated and synchronized values wrapped by processes",
       package:         package(),

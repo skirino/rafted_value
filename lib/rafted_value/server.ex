@@ -177,7 +177,8 @@ defmodule RaftedValue.Server do
   end
 
   defunp initialize_follower_state(known_members :: [GenServer.server], options :: [RaftedValue.option]) :: State.t do
-    %Snapshot{members: members, term: term, last_committed_entry: last_entry, data: data, command_results: command_results, config: config} = snapshot = call_add_server(known_members)
+    %Snapshot{members: members, term: term, last_committed_entry: last_entry, data: data, command_results: command_results, config: config} = snapshot =
+      call_add_server_with_fault_injection(known_members, options)
     logs        = Logs.new_for_new_follower(last_entry)
     election    = Election.new_for_follower(config)
     persistence =
@@ -188,6 +189,27 @@ defmodule RaftedValue.Server do
           Persistence.new_with_snapshot_sent_from_leader(dir, log_expansion_factor, snapshot)
       end
     %State{members: members, current_term: term, election: election, logs: logs, data: data, command_results: command_results, config: config, persistence: persistence}
+  end
+
+  defunp call_add_server_with_fault_injection(known_members :: [GenServer.server], options :: [RaftedValue.option]) :: Snapshot.t do
+    snapshot = call_add_server_and_reraise_with_pid(known_members)
+    # The following is solely for testing
+    case Keyword.get(options, :test_inject_fault_after_add_follower) do
+      :raise   -> raise RaftedValue.AddFollowerError, [message: "simulated error in RaftedValue.Server.call_add_server_with_fault_injection/2", pid: self()]
+      :timeout -> exit({:timeout, {:gen_fsm, :sync_send_event, [Enum.random(known_members), {:add_follower, self()}]}})
+      nil      -> snapshot
+    end
+  end
+
+  defunp call_add_server_and_reraise_with_pid(known_members :: [GenServer.server]) :: Snapshot.t do
+    try do
+      call_add_server(known_members)
+    rescue
+      e ->
+        # Pass `self()` to caller of `Supervisor.start_child/2` for cleanup of consensus group
+        stacktrace = System.stacktrace()
+        reraise(RaftedValue.AddFollowerError, [message: Exception.message(e), pid: self()], stacktrace)
+    end
   end
 
   defunp call_add_server(known_members :: [GenServer.server]) :: Snapshot.t do
