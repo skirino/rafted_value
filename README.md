@@ -19,7 +19,13 @@
 
 ## Notes on backward compatibility
 
-- In-disk log format was slightly changed in `0.3.0` from that of `0.2.x`.
+- In `0.4.0` and `0.5.0` we migrate from `:gen_fsm` (deprecated in Erlang/OTP 20) to `:gen_statem`.
+  This introduces a change in message format of member-to-member and client-to-leader communications.
+  Users of `0.3.x` must first upgrade to `0.4.0`, which understands both old and new message formats,
+  and itself sends messages in the old format (compatible with `0.3.x`).
+  Then upgrade to `0.5.0`, which also understands both the old and new message formats and sends messages in the new format.
+  You cannot go from `0.3.x` to `0.5.0`, since `0.3.x` does not understand messages from `0.5.0`.
+- On-disk log format was slightly changed in `0.3.0` from that of `0.2.x`.
 - Users of `<= 0.1.8` should upgrade to `0.1.10` before upgrading to `>= 0.2.0`.
     - RPC protocol of `<= 0.1.8` and that of `>= 0.2.0` are slightly incompatible
     - Version `0.1.10` should be able to interact with both `<= 0.1.8` and `>= 0.2.0`

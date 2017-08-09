@@ -695,7 +695,7 @@ defmodule RaftedValue.Server do
     |> next_state(state_name)
   end
 
-  # compatibility layer for :gen_fsm
+  # compatibility layer for rafted_value < v0.5.0
   def handle_info_common({:"$gen_sync_all_state_event", from, msg}, state_name, state) do
     handle_call_common(msg, from, state_name, state)
   end
