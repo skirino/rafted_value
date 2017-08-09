@@ -380,7 +380,7 @@ defmodule RaftedValueTest do
     end)
 
     new_conf = Map.update!(@conf, :election_timeout, fn t -> t + 1 end)
-    RaftedValue.change_config(leader, new_conf)
+    assert RaftedValue.change_config(leader, new_conf) == :ok
     :timer.sleep(@conf.heartbeat_timeout * 2)
     Enum.each(members, fn member ->
       assert RaftedValue.status(member).config == new_conf
