@@ -21,7 +21,7 @@ defmodule RaftedValue.Election do
 
   defun update_for_candidate(%__MODULE__{timer: timer} = e, config :: Config.t) :: t do
     if timer, do: :gen_fsm.cancel_timer(timer)
-    votes = PidSet.new |> PidSet.put(self())
+    votes = PidSet.new() |> PidSet.put(self())
     %__MODULE__{e | voted_for: self(), votes: votes, timer: start_timer(config)}
   end
 
