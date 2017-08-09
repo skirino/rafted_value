@@ -60,7 +60,7 @@ defmodule RaftedValue.PersistenceAndRecoveryTest do
   test "persist logs and snapshots and recover by reading them" do
     {:ok, _} = RaftedValue.start_link({:create_new_consensus_group, @config}, [name: @name, persistence_dir: @tmp_dir])
     assert in_memory_and_disk_logs_same?(1..1)
-    assert :gen_fsm.stop(@name) == :ok
+    assert :gen_statem.stop(@name) == :ok
     snapshot_path1 = Path.join(@tmp_dir, "snapshot_0_1")
     assert %Snapshot{} = read_snapshot(snapshot_path1)
     snapshot_committed_index1 = 1
@@ -69,7 +69,7 @@ defmodule RaftedValue.PersistenceAndRecoveryTest do
     assert in_memory_and_disk_logs_same?(snapshot_committed_index1 .. snapshot_committed_index1 + 1)
     assert RaftedValue.command(@name, :inc) == {:ok, 0}
     assert in_memory_and_disk_logs_same?(1..3)
-    assert :gen_fsm.stop(@name) == :ok
+    assert :gen_statem.stop(@name) == :ok
 
     {:ok, _} = RaftedValue.start_link({:create_new_consensus_group, @config}, [name: @name, persistence_dir: @tmp_dir])
     assert in_memory_and_disk_logs_same?(snapshot_committed_index1 .. snapshot_committed_index1 + 3)
@@ -77,7 +77,7 @@ defmodule RaftedValue.PersistenceAndRecoveryTest do
       assert RaftedValue.command(@name, :inc) == {:ok, i}
     end)
     assert in_memory_and_disk_logs_same?(snapshot_committed_index1 .. snapshot_committed_index1 + 43)
-    assert :gen_fsm.stop(@name) == :ok
+    assert :gen_statem.stop(@name) == :ok
     [snapshot_path2] = Path.wildcard(Path.join(@tmp_dir, "snapshot_*")) |> List.delete(snapshot_path1)
     assert %Snapshot{} = read_snapshot(snapshot_path2)
     snapshot_committed_index2 = snapshot_path_to_committed_index(snapshot_path2)
@@ -85,25 +85,25 @@ defmodule RaftedValue.PersistenceAndRecoveryTest do
     {:ok, _} = RaftedValue.start_link({:create_new_consensus_group, @config}, [name: @name, persistence_dir: @tmp_dir])
     assert in_memory_and_disk_logs_same?(snapshot_committed_index2 .. snapshot_committed_index1 + 44)
     assert RaftedValue.query(@name, :get) == {:ok, 41}
-    assert :gen_fsm.stop(@name) == :ok
+    assert :gen_statem.stop(@name) == :ok
   end
 
   test "uncommitted logs should be committed by lonely leader immediately after recovery" do
     {:ok, l} = RaftedValue.start_link({:create_new_consensus_group, @config}, [persistence_dir: @tmp_dir])
     {:ok, f} = RaftedValue.start_link({:join_existing_consensus_group, [l]})
     assert MapSet.new(RaftedValue.status(l).members) == MapSet.new([l, f])
-    assert :gen_fsm.stop(f) == :ok
+    assert :gen_statem.stop(f) == :ok
 
     # Now incoming commands won't be committed
     Enum.each(1..3, fn _ ->
       assert RaftedValue.command(l, :inc, 100) == {:error, :timeout}
     end)
-    assert :gen_fsm.stop(l) == :ok
+    assert :gen_statem.stop(l) == :ok
 
     # Restore from snapshot, commands should be applied
     {:ok, _} = RaftedValue.start_link({:create_new_consensus_group, @config}, [name: @name, persistence_dir: @tmp_dir])
     assert RaftedValue.query(@name, :get) == {:ok, 3}
-    assert :gen_fsm.stop(@name) == :ok
+    assert :gen_statem.stop(@name) == :ok
   end
 
   test "follower should replicate log entries and store them in disk with de-duplication" do
@@ -121,8 +121,8 @@ defmodule RaftedValue.PersistenceAndRecoveryTest do
     entries = LogEntry.read_as_stream(log_path) |> Enum.to_list()
     assert entries == Enum.uniq(entries)
 
-    assert :gen_fsm.stop(f) == :ok
-    assert :gen_fsm.stop(l) == :ok
+    assert :gen_statem.stop(f) == :ok
+    assert :gen_statem.stop(l) == :ok
   end
 
   test "follower should reset its members field when recovery log entry is found" do
@@ -132,15 +132,15 @@ defmodule RaftedValue.PersistenceAndRecoveryTest do
     {:ok, f1} = RaftedValue.start_link({:join_existing_consensus_group, [l1]} , [persistence_dir: dir_f])
     assert Enum.sort(RaftedValue.status(l1).members) == Enum.sort([l1, f1])
     assert Enum.sort(RaftedValue.status(f1).members) == Enum.sort([l1, f1])
-    assert :gen_fsm.stop(f1) == :ok
-    assert :gen_fsm.stop(l1) == :ok
+    assert :gen_statem.stop(f1) == :ok
+    assert :gen_statem.stop(l1) == :ok
 
     {:ok, l2} = RaftedValue.start_link({:create_new_consensus_group, @config}, [persistence_dir: dir_l])
     {:ok, f2} = RaftedValue.start_link({:join_existing_consensus_group, [l2]}, [persistence_dir: dir_f])
     assert Enum.sort(RaftedValue.status(l2).members) == Enum.sort([l2, f2])
     assert Enum.sort(RaftedValue.status(f2).members) == Enum.sort([l2, f2])
-    assert :gen_fsm.stop(f2) == :ok
-    assert :gen_fsm.stop(l2) == :ok
+    assert :gen_statem.stop(f2) == :ok
+    assert :gen_statem.stop(l2) == :ok
   end
 
   test "non-persisting and persisting members can interchange snapshots with each other" do
@@ -153,8 +153,8 @@ defmodule RaftedValue.PersistenceAndRecoveryTest do
     Enum.each(11 .. 20, fn i ->
       assert RaftedValue.command(n1, :inc) == {:ok, i}
     end)
-    assert :gen_fsm.stop(p1) == :ok
-    assert :gen_fsm.stop(n1) == :ok
+    assert :gen_statem.stop(p1) == :ok
+    assert :gen_statem.stop(n1) == :ok
 
     # recover from disk snapshot
     {:ok, p2} = RaftedValue.start_link({:create_new_consensus_group, @config}, [persistence_dir: @tmp_dir])
@@ -167,7 +167,7 @@ defmodule RaftedValue.PersistenceAndRecoveryTest do
       assert RaftedValue.command(p2, :inc) == {:ok, i}
     end)
 
-    assert :gen_fsm.stop(n2) == :ok
-    assert :gen_fsm.stop(p2) == :ok
+    assert :gen_statem.stop(n2) == :ok
+    assert :gen_statem.stop(p2) == :ok
   end
 end

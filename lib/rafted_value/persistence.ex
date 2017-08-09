@@ -93,9 +93,9 @@ defmodule RaftedValue.Persistence do
     compressed        = Snapshot.encode(snapshot)
     File.write!(snapshot_path, compressed)
 
-    # notify the gen_fsm process (we have to wait for reply in order to ensure that older snapshots won't be used anymore)
+    # notify the gen_statem process (we have to wait for reply in order to ensure that older snapshots won't be used anymore)
     message = {:snapshot_created, snapshot_path, term, last_committed_index, byte_size(compressed)}
-    :ok = :gen_fsm.sync_send_all_state_event(server_pid, message, :infinity)
+    :ok = :gen_statem.call(server_pid, message, :infinity)
 
     # cleanup obsolete snapshots and logs
     Path.wildcard(Path.join(dir, "snapshot_*"))

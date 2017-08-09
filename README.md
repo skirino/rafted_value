@@ -15,7 +15,7 @@
 - Supports membership changes:
     - adding/removing a member
     - replacing leader
-- Each consensus group member is implemented as a [`:gen_fsm`](http://erlang.org/doc/man/gen_fsm.html) process.
+- Each consensus group member is implemented as a [`:gen_statem`](http://erlang.org/doc/man/gen_statem.html) process.
 
 ## Notes on backward compatibility
 
@@ -101,7 +101,7 @@ The 3-member consensus group keeps on working if 1 member dies:
 
 ```ex
 # :"3@skirino-Manjaro"
-iex(3@skirino-Manjaro)4> :gen_fsm.stop(:baz)
+iex(3@skirino-Manjaro)4> :gen_statem.stop(:baz)
 
 # :"1@skirino-Manjaro"
 iex(1@skirino-Manjaro)11> RaftedValue.command(:foo, :dequeue)

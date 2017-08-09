@@ -191,7 +191,7 @@ defmodule RaftedValue.Server do
     # The following is solely for testing
     case Keyword.get(options, :test_inject_fault_after_add_follower) do
       :raise   -> raise RaftedValue.AddFollowerError, [message: "simulated error in RaftedValue.Server.call_add_server_with_fault_injection/2", pid: self()]
-      :timeout -> exit({:timeout, {:gen_fsm, :sync_send_event, [Enum.random(known_members), {:add_follower, self()}]}})
+      :timeout -> exit({:timeout, {:gen_statem, :call, [Enum.random(known_members), {:add_follower, self()}, {:dirty_timeout, 5000}]}})
       nil      -> snapshot
     end
   end
@@ -222,7 +222,7 @@ defmodule RaftedValue.Server do
 
   defp call_add_server_one(maybe_leader) do
     try do
-      :gen_fsm.sync_send_event(maybe_leader, {:add_follower, self()})
+      :gen_statem.call(maybe_leader, {:add_follower, self()}, {:dirty_timeout, 5000})
     catch
       :exit, {:noproc, _} -> {:error, :noproc}
     end
@@ -694,6 +694,8 @@ defmodule RaftedValue.Server do
     %State{state | persistence: %Persistence{persistence | snapshot_writer: nil}}
     |> next_state(state_name)
   end
+
+  # compatibility layer for :gen_fsm
   def handle_info_common({:"$gen_sync_all_state_event", from, msg}, state_name, state) do
     handle_call_common(msg, from, state_name, state)
   end
@@ -709,6 +711,7 @@ defmodule RaftedValue.Server do
   def handle_info_common({:timeout, _ref, {:"$gen_event", msg}}, state_name, state) do
     apply(__MODULE__, state_name, [:cast, msg, state])
   end
+
   def handle_info_common(_msg, state_name, state) do
     next_state(state, state_name)
   end
@@ -767,7 +770,7 @@ defmodule RaftedValue.Server do
         hook.on_follower_added(data, follower_pid)
         %State{state | members: Members.membership_change_committed(members, index)}
       {_term, index , :remove_follower, follower_pid} ->
-        send_event(state, follower_pid, :remove_follower_completed) # don't use :gen_fsm.stop in order to stop `follower_pid` only when it's actually a follower
+        send_event(state, follower_pid, :remove_follower_completed) # don't use :gen_statem.stop in order to stop `follower_pid` only when it's actually a follower
         hook.on_follower_removed(data, follower_pid)
         %State{state | members: Members.membership_change_committed(members, index)}
       {_term, _index, :restore_from_files, leader_pid} ->

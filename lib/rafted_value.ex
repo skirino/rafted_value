@@ -124,7 +124,7 @@ defmodule RaftedValue do
   Removes a follower from a consensus group.
   """
   defun remove_follower(leader :: GenServer.server, follower_pid :: g[pid]) :: :ok | {:error, remove_follower_error_reason} do
-    :gen_fsm.sync_send_event(leader, {:remove_follower, follower_pid})
+    call(leader, {:remove_follower, follower_pid})
   end
 
   @doc """
@@ -132,7 +132,7 @@ defmodule RaftedValue do
   """
   defun replace_leader(current_leader :: GenServer.server, new_leader :: nil | pid) :: :ok | {:error, replace_leader_error_reason} do
     (current_leader, new_leader) when new_leader == nil or is_pid(new_leader) ->
-      :gen_fsm.sync_send_event(current_leader, {:replace_leader, new_leader})
+      call(current_leader, {:replace_leader, new_leader})
   end
 
   @doc """
@@ -148,7 +148,7 @@ defmodule RaftedValue do
   """
   defun force_remove_member(member :: GenServer.server, member_to_remove :: pid) :: :ok | {:error, :leader_exists} do
     (member, member_to_remove) when is_pid(member_to_remove) and member != member_to_remove ->
-      :gen_fsm.sync_send_all_state_event(member, {:force_remove_member, member_to_remove})
+      call(member, {:force_remove_member, member_to_remove})
   end
 
   @type command_identifier :: reference | any
@@ -167,7 +167,7 @@ defmodule RaftedValue do
                 timeout     :: timeout \\ 5000,
                 id          :: command_identifier \\ make_ref()) :: {:ok, Data.command_ret} | {:error, :noproc | :timeout | not_leader} do
     catch_exit(fn ->
-      :gen_fsm.sync_send_event(leader, {:command, command_arg, id}, timeout)
+      call(leader, {:command, command_arg, id}, timeout)
     end)
   end
 
@@ -182,7 +182,7 @@ defmodule RaftedValue do
               query_arg :: RaftedValue.Data.query_arg,
               timeout   :: timeout \\ 5000) :: {:ok, Data.query_ret} | {:error, :noproc | :timeout | not_leader} do
     catch_exit(fn ->
-      :gen_fsm.sync_send_event(leader, {:query, query_arg}, timeout)
+      call(leader, {:query, query_arg}, timeout)
     end)
   end
 
@@ -201,7 +201,7 @@ defmodule RaftedValue do
   The new configuration is replicated (as raft log) to all members.
   """
   defun change_config(leader :: GenServer.server, new_config = %Config{}) :: :ok | {:error, not_leader} do
-    :gen_fsm.sync_send_event(leader, {:change_config, new_config})
+    call(leader, {:change_config, new_config})
   end
 
   @type status_result :: %{
@@ -218,7 +218,7 @@ defmodule RaftedValue do
   Retrieves status of a member in a consensus group.
   """
   defun status(server :: GenServer.server, timeout :: timeout \\ 5000) :: status_result do
-    :gen_fsm.sync_send_all_state_event(server, :status, timeout)
+    call(server, :status, timeout)
   end
 
   @doc """
@@ -226,5 +226,9 @@ defmodule RaftedValue do
   """
   defun read_last_log_index(dir :: Path.t) :: nil | LogIndex.t do
     Persistence.read_last_log_index(dir)
+  end
+
+  defp call(server, msg, timeout \\ 5000) do
+    :gen_statem.call(server, msg, {:dirty_timeout, timeout})
   end
 end

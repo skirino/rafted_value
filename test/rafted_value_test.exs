@@ -75,7 +75,7 @@ defmodule RaftedValueTest do
 
   def simulate_send_sync_event(dest, event) do
     ref = make_ref()
-    send(dest, {:"$gen_sync_event", {self(), ref}, event})
+    send(dest, {:"$gen_call", {self(), ref}, event})
     ref
   end
 
@@ -97,7 +97,7 @@ defmodule RaftedValueTest do
     wait_until_member_change_completes(leader)
     assert_receive({:EXIT, ^follower2, :normal})
 
-    assert :gen_fsm.stop(leader) == :ok
+    assert :gen_statem.stop(leader) == :ok
     refute Process.alive?(leader)
   end
 
@@ -123,7 +123,7 @@ defmodule RaftedValueTest do
   test "should report error when trying to add already joined member" do
     {:ok, leader} = RaftedValue.start_link({:create_new_consensus_group, @conf})
     follower1 = add_follower(leader)
-    assert :gen_fsm.sync_send_event(leader, {:add_follower, follower1}) == {:error, :already_joined}
+    assert :gen_statem.call(leader, {:add_follower, follower1}) == {:error, :already_joined}
   end
 
   test "should report error when trying to remove leader" do
@@ -148,7 +148,7 @@ defmodule RaftedValueTest do
 
   test "should refuse to remove healthy follower if it breaks the current quorum" do
     {leader, [follower1, follower2]} = make_cluster(2)
-    assert :gen_fsm.stop(follower1) == :ok
+    assert :gen_statem.stop(follower1) == :ok
     assert_received({:EXIT, ^follower1, :normal})
     :timer.sleep(@t_max_election_timeout)
     assert RaftedValue.remove_follower(leader, follower2) == {:error, :will_break_quorum}
@@ -209,7 +209,7 @@ defmodule RaftedValueTest do
 
   test "replace_leader should reject change to unhealthy follower" do
     {leader, [follower1, _]} = make_cluster(2)
-    assert :gen_fsm.stop(follower1) == :ok
+    assert :gen_statem.stop(follower1) == :ok
     assert_received({:EXIT, ^follower1, :normal})
     :timer.sleep(@t_max_election_timeout)
     assert RaftedValue.replace_leader(leader, follower1) == {:error, :new_leader_unresponsive}
@@ -286,7 +286,7 @@ defmodule RaftedValueTest do
 
       followers_failing = Enum.take_random(followers, div(n_members - 1, 2))
       Enum.each(followers_failing, fn f ->
-        assert :gen_fsm.stop(f) == :ok
+        assert :gen_statem.stop(f) == :ok
         assert_received({:EXIT, ^f, :normal})
         assert RaftedValue.command(leader, :get) == {:ok, 1}
         assert RaftedValue.query(  leader, :get) == {:ok, 1}
@@ -298,7 +298,7 @@ defmodule RaftedValueTest do
       {:leader, _} = :sys.get_state(leader)
 
       follower_threshold = Enum.random(followers -- followers_failing)
-      assert :gen_fsm.stop(follower_threshold) == :ok
+      assert :gen_statem.stop(follower_threshold) == :ok
       assert_received({:EXIT, ^follower_threshold, :normal})
       assert RaftedValue.command(leader, :get, 50) == {:error, :timeout}
       # read-only query succeeds if it is processed within leader's lease
@@ -314,7 +314,7 @@ defmodule RaftedValueTest do
   test "3,4,5,6,7 member cluster should elect new leader after leader failure" do
     [3, 4, 5, 6, 7] |> Enum.each(fn n_members ->
       {leader, followers} = make_cluster(n_members - 1)
-      assert :gen_fsm.stop(leader) == :ok
+      assert :gen_statem.stop(leader) == :ok
       new_leader = wait_until_someone_elected_leader(followers)
       assert RaftedValue.command(new_leader, :get) == {:ok, 0}
       assert RaftedValue.query(  new_leader, :get) == {:ok, 0}
@@ -324,8 +324,8 @@ defmodule RaftedValueTest do
   test "should reject vote request from disruptive ex-member as long as leader is working fine" do
     defmodule DropRemoveFollowerCompleted do
       def send_event(_server, :remove_follower_completed), do: :ok
-      def send_event(server, event), do: :gen_fsm.send_event(server, event)
-      def reply(from, reply), do: :gen_fsm.reply(from, reply)
+      def send_event(server, event), do: :gen_statem.cast(server, event)
+      def reply(from, reply), do: :gen_statem.reply(from, reply)
     end
 
     config = Map.put(@conf, :communication_module, DropRemoveFollowerCompleted)
@@ -352,7 +352,7 @@ defmodule RaftedValueTest do
       remaining_members = Enum.take_random([leader | followers], div(n_members, 2))
       failed_members    = [leader | followers] -- remaining_members
 
-      Enum.each(failed_members, &:gen_fsm.stop/1)
+      Enum.each(failed_members, &:gen_statem.stop/1)
       :timer.sleep(@t_max_election_timeout * 2)
       refute Enum.any?(remaining_members, fn member ->
         RaftedValue.status(member).state_name == :leader
@@ -396,7 +396,7 @@ defmodule RaftedValueTest do
     {leader, followers} = make_cluster(2)
 
     send(leader, :info_message)
-    assert :gen_fsm.send_all_state_event(leader, :foo) == :ok
+    assert :gen_statem.cast(leader, :foo) == :ok
     result = RaftedValue.status(leader)
     assert_equal_as_set(Map.keys(result), [:from, :members, :leader, :unresponsive_followers, :current_term, :state_name, :config])
     %{members: all, leader: l} = result
@@ -413,14 +413,14 @@ defmodule RaftedValueTest do
         %s{} when s in [RaftedValue.RPC.AppendEntriesRequest, RaftedValue.RPC.AppendEntriesResponse] ->
           spawn(fn ->
             :timer.sleep(40)
-            :gen_fsm.send_event(server, event)
+            :gen_statem.cast(server, event)
           end)
-        _ -> :gen_fsm.send_event(server, event)
+        _ -> :gen_statem.cast(server, event)
       end
     end
 
     def reply(from, reply) do
-      :gen_fsm.reply(from, reply)
+      :gen_statem.reply(from, reply)
     end
   end
 
@@ -439,8 +439,8 @@ defmodule RaftedValueTest do
     # Lease time should be calculated from the time AppendEntriesRequest messages are broadcasted from leader to follwers.
     # `command` will take ~80ms for round trip of AppendEntriesRequest and AppendEntriesResponse.
     assert RaftedValue.command(leader, :inc)    == {:ok, 0}
-    assert :gen_fsm.stop(follower1)             == :ok
-    assert :gen_fsm.stop(follower2)             == :ok
+    assert :gen_statem.stop(follower1)          == :ok
+    assert :gen_statem.stop(follower2)          == :ok
     assert RaftedValue.query(leader, :get)      == {:ok, 1}           # lease available, can answer the query solely by the leader
     :timer.sleep(20)                                                  # 100ms elapsed, lease expired
     assert RaftedValue.query(leader, :get, 100) == {:error, :timeout} # cannot confirm whether the leader's value is still the latest
@@ -677,7 +677,7 @@ defmodule RaftedValueTest do
         if Enum.empty?(isolated), do: nil, else: Enum.random(isolated)
       end
     if target do
-      :gen_fsm.stop(target)
+      :gen_statem.stop(target)
       assert_receive({:EXIT, ^target, :normal})
       new_context = %{context | working: List.delete(working, target), killed: [target | killed], isolated: List.delete(isolated, target)}
       if target == leader do
@@ -789,7 +789,7 @@ defmodule RaftedValueTest do
 
     def send_event(server, event) do
       if reachable?(server) do
-        :gen_fsm.send_event(server, event)
+        :gen_statem.cast(server, event)
       else
         :ok
       end
@@ -797,7 +797,7 @@ defmodule RaftedValueTest do
 
     def reply({to, _} = from, reply) do
       if reachable?(to) do
-        :gen_fsm.reply(from, reply)
+        :gen_statem.reply(from, reply)
       else
         :ok
       end
