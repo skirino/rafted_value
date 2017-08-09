@@ -137,8 +137,13 @@ defmodule RaftedValueTest do
   end
 
   test "start_link_and_join_consensus_group should return error and the process should die when no leader found" do
-    {:error, _} = RaftedValue.start_link({:join_existing_consensus_group, [:unknown, :member]})
-    assert_receive({:EXIT, _pid, _})
+    :error_logger.tty(false) # suppress crash report due to error in `init/1`
+    try do
+      {:error, _} = RaftedValue.start_link({:join_existing_consensus_group, [:unknown, :member]})
+      assert_receive({:EXIT, _pid, _})
+    after
+      :error_logger.tty(true)
+    end
   end
 
   test "should refuse to remove healthy follower if it breaks the current quorum" do
