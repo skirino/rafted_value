@@ -1,7 +1,7 @@
 use Croma
 
 defmodule RaftedValue.Leadership do
-  alias RaftedValue.{PidSet, Members, Config, Monotonic}
+  alias RaftedValue.{PidSet, Members, Config, Monotonic, Timer}
 
   use Croma.Struct, fields: [
     heartbeat_timer:          Croma.Reference,
@@ -20,19 +20,19 @@ defmodule RaftedValue.Leadership do
   end
 
   defun reset_heartbeat_timer(%__MODULE__{heartbeat_timer: timer} = l, config :: Config.t) :: t do
-    :gen_fsm.cancel_timer(timer)
+    Timer.cancel(timer)
     %__MODULE__{l | heartbeat_timer: start_heartbeat_timer(config)}
   end
   defun reset_quorum_timer(%__MODULE__{quorum_timer: timer} = l, config :: Config.t) :: t do
-    :gen_fsm.cancel_timer(timer)
+    Timer.cancel(timer)
     %__MODULE__{l | quorum_timer: start_quorum_timer(config), quorum_timer_started_at: Monotonic.millis()}
   end
 
   defunp start_heartbeat_timer(%Config{heartbeat_timeout: timeout}) :: reference do
-    :gen_fsm.send_event_after(timeout, :heartbeat_timeout)
+    Timer.make(timeout, :heartbeat_timeout)
   end
   defunp start_quorum_timer(config :: Config.t) :: reference do
-    :gen_fsm.send_event_after(max_election_timeout(config), :cannot_reach_quorum)
+    Timer.make(max_election_timeout(config), :cannot_reach_quorum)
   end
 
   defun follower_responded(%__MODULE__{quorum_timer_started_at: started_at, follower_responded_times: times} = l,
@@ -57,9 +57,8 @@ defmodule RaftedValue.Leadership do
   end
 
   defun stop_timers(%__MODULE__{heartbeat_timer: t1, quorum_timer: t2}) :: :ok do
-    :gen_fsm.cancel_timer(t1)
-    :gen_fsm.cancel_timer(t2)
-    :ok
+    Timer.cancel(t1)
+    Timer.cancel(t2)
   end
 
   defun unresponsive_followers(%__MODULE__{follower_responded_times: times},
