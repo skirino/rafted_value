@@ -31,6 +31,7 @@ defmodule RaftedValue.Server do
   #   - others (client-to-anymember messages)
   #     - {:snapshot_created, path, term, index, size}
   #     - {:force_remove_member, pid}
+  #     - :status
   #
   # ## State transitions
   #
@@ -83,26 +84,20 @@ defmodule RaftedValue.Server do
     ]
   end
 
-  @behaviour :gen_fsm
-
-  defmacrop same_fsm_state(state_data) do
-    {state_name, _arity} = __CALLER__.function
-    unless state_name in [:leader, :candidate, :follower], do: raise "`same_fsm_state/1` macro must be called from `leader`, `candidate`, `follower`"
-    quote bind_quoted: [state_name: state_name, state_data: state_data] do
-      {:next_state, state_name, state_data}
-    end
-  end
-
-  defmacrop same_fsm_state_reply(state_data, reply) do
-    {state_name, _arity} = __CALLER__.function
-    unless state_name in [:leader, :candidate, :follower], do: raise "`same_fsm_state/1` macro must be called from `leader`, `candidate`, `follower`"
-    quote bind_quoted: [state_name: state_name, state_data: state_data, reply: reply] do
-      {:reply, reply, state_name, state_data}
-    end
-  end
+  @behaviour :gen_statem
+  def callback_mode(), do: :state_functions
 
   defp next_state(state_data, state_name) do
     {:next_state, state_name, state_data}
+  end
+
+  defp keep_fsm_state(state_data) do
+    {:keep_state, state_data}
+  end
+
+  defp keep_fsm_state_and_reply(state_data, from, reply) do
+    reply(state_data, from, reply)
+    {:keep_state, state_data}
   end
 
   #
@@ -236,7 +231,8 @@ defmodule RaftedValue.Server do
   #
   # leader state
   #
-  def leader(%AppendEntriesResponse{from: from, success: success, i_replicated: i_replicated, leader_timestamp: leader_timestamp} = rpc,
+  def leader(:cast,
+             %AppendEntriesResponse{from: from, success: success, i_replicated: i_replicated, leader_timestamp: leader_timestamp} = rpc,
              %State{members: members, current_term: current_term, leadership: leadership, logs: logs, config: config, persistence: persistence} = state) do
     become_follower_if_new_term_started(rpc, state, fn ->
       new_leadership = Leadership.follower_responded(leadership, members, from, leader_timestamp, config)
@@ -254,118 +250,126 @@ defmodule RaftedValue.Server do
                 convert_state_as_follower(new_state2, current_term) |> next_state(:follower) # step down in order not to serve client requests any more
               {:too_old, _} ->
                 # `from`'s logs lag too behind => try leader change next time
-                same_fsm_state(new_state2)
+                keep_fsm_state(new_state2)
             end
-          _ -> same_fsm_state(new_state2)
+          _ -> keep_fsm_state(new_state2)
         end
       else
         # prev log from leader didn't match follower's => decrement "next index" for the follower and try to resend AppendEntries
         new_logs = Logs.decrement_next_index_of_follower(logs, from)
         %State{state | leadership: new_leadership, logs: new_logs}
         |> send_append_entries(from, Monotonic.millis())
-        |> same_fsm_state()
+        |> keep_fsm_state()
       end
     end)
   end
-  def leader(:heartbeat_timeout, state) do
-    broadcast_append_entries(state) |> same_fsm_state()
+  def leader(:cast, :heartbeat_timeout, state) do
+    broadcast_append_entries(state) |> keep_fsm_state()
   end
-  def leader(:cannot_reach_quorum, %State{current_term: term} = state) do
+  def leader(:cast, :cannot_reach_quorum, %State{current_term: term} = state) do
     convert_state_as_follower(state, term)
     |> next_state(:follower)
   end
-  def leader(%RequestVoteRequest{} = rpc, state) do
+  def leader(:cast, %RequestVoteRequest{} = rpc, state) do
     handle_request_vote_request(rpc, state, :leader)
   end
-  def leader(%s{} = rpc, state) when s in [AppendEntriesRequest, RequestVoteResponse] do
+  def leader(:cast, %s{} = rpc, state) when s in [AppendEntriesRequest, RequestVoteResponse] do
     become_follower_if_new_term_started(rpc, state, fn ->
-      same_fsm_state(state) # neglect `AppendEntriesRequest`, `RequestVoteResponse` for this term / older term
+      keep_fsm_state(state) # neglect `AppendEntriesRequest`, `RequestVoteResponse` for this term / older term
     end)
   end
-  def leader(_event, state) do
-    same_fsm_state(state) # leader neglects `:election_timeout`, `:remove_follower_completed`, `InstallSnapshot`, `TimeoutNow`
+  def leader(:cast, msg, state) do
+    # leader neglects `:election_timeout`, `:remove_follower_completed`, `InstallSnapshot`, `TimeoutNow`
+    handle_cast_common(msg, :leader, state)
   end
 
-  def leader({:command, arg, cmd_id}, from, %State{current_term: term, logs: logs, persistence: persistence} = state) do
+  def leader({:call, from}, {:command, arg, cmd_id}, %State{current_term: term, logs: logs, persistence: persistence} = state) do
     {new_logs, entry} = Logs.add_entry(logs, persistence, fn index -> {term, index, :command, {from, arg, cmd_id}} end)
     %State{state | logs: new_logs}
     |> persist_log_entries([entry])
     |> broadcast_append_entries()
-    |> same_fsm_state()
+    |> keep_fsm_state()
   end
-  def leader({:query, arg}, from, %State{members: members, current_term: term, leadership: leadership, logs: logs, config: config, persistence: persistence} = state) do
+  def leader({:call, from}, {:query, arg}, %State{members: members, current_term: term, leadership: leadership, logs: logs, config: config, persistence: persistence} = state) do
     if Leadership.lease_expired?(leadership, members, config) do
       # if leader's lease has already expired, fall back to log replication (handled in the same way as commands)
       {new_logs, entry} = Logs.add_entry(logs, persistence, fn index -> {term, index, :query, {from, arg}} end)
       %State{state | logs: new_logs}
       |> persist_log_entries([entry])
       |> broadcast_append_entries()
-      |> same_fsm_state()
+      |> keep_fsm_state()
     else
       # with valid lease, leader can respond by itself
       run_query(state, {from, arg})
-      same_fsm_state(state)
+      keep_fsm_state(state)
     end
   end
-  def leader({:change_config, new_config},
-             _from,
+  def leader({:call, from},
+             {:change_config, new_config},
              %State{current_term: term, logs: logs, persistence: persistence} = state) do
     {new_logs, entry} = Logs.add_entry(logs, persistence, fn index -> {term, index, :change_config, new_config} end)
     %State{state | logs: new_logs}
     |> persist_log_entries([entry])
-    |> same_fsm_state_reply(:ok)
+    |> keep_fsm_state_and_reply(from, :ok)
   end
 
-  def leader({:add_follower, new_follower},
-             from,
+  def leader({:call, from},
+             {:add_follower, new_follower},
              %State{members: members, current_term: term, logs: logs, persistence: persistence} = state) do
     {new_logs, add_follower_entry} = Logs.add_entry_on_add_follower(logs, term, new_follower, persistence)
     case Members.start_adding_follower(members, add_follower_entry) do
       {:error, _} = e ->
         # we have to revert to the `state` without `add_follower_entry`
-        same_fsm_state_reply(state, e)
+        keep_fsm_state_and_reply(state, from, e)
       {:ok, new_members} ->
         %State{state | members: new_members, logs: new_logs}
         |> persist_log_entries([add_follower_entry])
         |> send_snapshot(new_follower, fn(mod, snapshot) -> mod.reply(from, {:ok, snapshot}) end)
         |> broadcast_append_entries()
-        |> same_fsm_state()
+        |> keep_fsm_state()
     end
   end
-  def leader({:remove_follower, old_follower},
-             _from,
+  def leader({:call, from},
+             {:remove_follower, old_follower},
              %State{members: members, current_term: term, leadership: leadership, logs: logs, config: config, persistence: persistence} = state) do
     {new_logs, remove_follower_entry} = Logs.add_entry_on_remove_follower(logs, term, old_follower, persistence)
     case Members.start_removing_follower(members, remove_follower_entry) do
       {:error, _} = e ->
         # we have to revert to the `state` without `remove_follower_entry`
-        same_fsm_state_reply(state, e)
+        keep_fsm_state_and_reply(state, from, e)
       {:ok, new_members} ->
         if Leadership.can_safely_remove?(leadership, members, old_follower, config) do
           new_leadership = Leadership.remove_follower_response_time_entry(leadership, old_follower)
           %State{state | members: new_members, leadership: new_leadership, logs: new_logs}
           |> persist_log_entries([remove_follower_entry])
           |> broadcast_append_entries()
-          |> same_fsm_state_reply(:ok)
+          |> keep_fsm_state_and_reply(from, :ok)
         else
           # we have to revert to the `state` without `remove_follower_entry`
-          same_fsm_state_reply(state, {:error, :will_break_quorum})
+          keep_fsm_state_and_reply(state, from, {:error, :will_break_quorum})
         end
     end
   end
-  def leader({:replace_leader, new_leader},
-             _from,
+  def leader({:call, from},
+             {:replace_leader, new_leader},
              %State{members: members, leadership: leadership, config: config} = state) do
     # We don't immediately try to replace leader; instead we invoke replacement when receiving message from the target member
     case Members.start_replacing_leader(members, new_leader) do
-      {:error, _} = e    -> same_fsm_state_reply(state, e)
+      {:error, _} = e    -> keep_fsm_state_and_reply(state, from, e)
       {:ok, new_members} ->
         if new_leader in Leadership.unresponsive_followers(leadership, members, config) do
-          same_fsm_state_reply(state, {:error, :new_leader_unresponsive})
+          keep_fsm_state_and_reply(state, from, {:error, :new_leader_unresponsive})
         else
-          %State{state | members: new_members} |> same_fsm_state_reply(:ok)
+          %State{state | members: new_members} |> keep_fsm_state_and_reply(from, :ok)
         end
     end
+  end
+  def leader({:call, from}, msg, state) do
+    handle_call_common(msg, from, :leader, state)
+  end
+
+  def leader(:info, msg, state) do
+    handle_info_common(msg, :leader, state)
   end
 
   def become_leader(%State{members: members, current_term: term, logs: logs, config: config, persistence: persistence} = state) do
@@ -412,43 +416,49 @@ defmodule RaftedValue.Server do
   #
   # candidate state
   #
-  def candidate(%AppendEntriesRequest{} = req, state) do
-    handle_append_entries_request(req, state, :candidate)
+  def candidate(:cast, %AppendEntriesRequest{} = req, state) do
+    handle_append_entries_request(req, state)
   end
-  def candidate(%AppendEntriesResponse{} = rpc, state) do
+  def candidate(:cast, %AppendEntriesResponse{} = rpc, state) do
     become_follower_if_new_term_started(rpc, state, fn ->
-      same_fsm_state(state) # neglect `AppendEntriesResponse` from this term / older term
+      keep_fsm_state(state) # neglect `AppendEntriesResponse` from this term / older term
     end)
   end
-  def candidate(%RequestVoteRequest{} = rpc, state) do
+  def candidate(:cast, %RequestVoteRequest{} = rpc, state) do
     handle_request_vote_request(rpc, state, :candidate)
   end
-  def candidate(%RequestVoteResponse{from: from, term: term, vote_granted: granted?} = rpc,
+  def candidate(:cast,
+                %RequestVoteResponse{from: from, term: term, vote_granted: granted?} = rpc,
                 %State{members: members, current_term: current_term, election: election} = state) do
     become_follower_if_new_term_started(rpc, state, fn ->
       if term < current_term or !granted? do
-        same_fsm_state(state) # neglect `RequestVoteResponse` from older term
+        keep_fsm_state(state) # neglect `RequestVoteResponse` from older term
       else
         {new_election, majority?} = Election.gain_vote(election, members, from)
         new_state = %State{state | election: new_election}
         if majority? do
           become_leader(new_state)
         else
-          same_fsm_state(new_state)
+          keep_fsm_state(new_state)
         end
       end
     end)
   end
-  def candidate(:election_timeout, state) do
+  def candidate(:cast, :election_timeout, state) do
     become_candidate_and_start_new_election(state)
   end
-  def candidate(_event, state) do
-    same_fsm_state(state) # neglect `:heartbeat_timeout`, `:remove_follower_completed`, `cannot_reach_quorum`, `InstallSnapshot`, `TimeoutNow`
+  def candidate(:cast, msg, state) do
+    # neglect `:heartbeat_timeout`, `:remove_follower_completed`, `cannot_reach_quorum`, `InstallSnapshot`, `TimeoutNow`
+    handle_cast_common(msg, :candidate, state)
   end
 
-  def candidate(_event, _from, %State{members: members} = state) do
+  def candidate({:call, from}, msg, state) do
     # non-leader rejects synchronous events: `{:command, arg, cmd_id}`, `{:query, arg}`, `{:change_config, new_config}`, `{:add_follower, pid}`, `{:remove_follower, pid}`, `{:replace_leader, new_leader}`
-    same_fsm_state_reply(state, {:error, {:not_leader, members.leader}})
+    handle_call_common(msg, from, :candidate, state)
+  end
+
+  def candidate(:info, msg, state) do
+    handle_info_common(msg, :candidate, state)
   end
 
   defp become_candidate_and_start_new_election(%State{members: members, current_term: term, election: election, config: config} = state,
@@ -481,21 +491,22 @@ defmodule RaftedValue.Server do
   #
   # follower state
   #
-  def follower(%AppendEntriesRequest{} = req, state) do
-    handle_append_entries_request(req, state, :follower)
+  def follower(:cast, %AppendEntriesRequest{} = req, state) do
+    handle_append_entries_request(req, state)
   end
-  def follower(%RequestVoteRequest{} = rpc, state) do
+  def follower(:cast, %RequestVoteRequest{} = rpc, state) do
     handle_request_vote_request(rpc, state, :follower)
   end
-  def follower(%s{} = rpc, state) when s in [AppendEntriesResponse, RequestVoteResponse] do
+  def follower(:cast, %s{} = rpc, state) when s in [AppendEntriesResponse, RequestVoteResponse] do
     become_follower_if_new_term_started(rpc, state, fn ->
-      same_fsm_state(state) # neglect `AppendEntriesResponse`, `RequestVoteResponse` from this term / older term
+      keep_fsm_state(state) # neglect `AppendEntriesResponse`, `RequestVoteResponse` from this term / older term
     end)
   end
-  def follower(:election_timeout, state) do
+  def follower(:cast, :election_timeout, state) do
     become_candidate_and_start_new_election(state)
   end
-  def follower(%TimeoutNow{append_entries_req: req},
+  def follower(:cast,
+               %TimeoutNow{append_entries_req: req},
                %State{members: members, current_term: current_term, logs: logs, persistence: persistence} = state) do
     %AppendEntriesRequest{term: term, prev_log: prev_log, entries: entries, i_leader_commit: i_leader_commit} = req
     if term == current_term and Logs.contain_given_prev_log?(logs, prev_log) do
@@ -508,27 +519,32 @@ defmodule RaftedValue.Server do
       |> become_candidate_and_start_new_election(true)
     else
       # if condition is not met neglect the message
-      same_fsm_state(state)
+      keep_fsm_state(state)
     end
   end
-  def follower(:remove_follower_completed, state) do
+  def follower(:cast, :remove_follower_completed, state) do
     {:stop, :normal, state}
   end
-  def follower(%InstallSnapshot{} = rpc, state) do
+  def follower(:cast, %InstallSnapshot{} = rpc, state) do
     handle_install_snapshot(Snapshot.from_install_snapshot(rpc), state)
-    |> same_fsm_state()
+    |> keep_fsm_state()
   end
-  def follower(%InstallSnapshotCompressed{bin: bin}, state) do
+  def follower(:cast, %InstallSnapshotCompressed{bin: bin}, state) do
     handle_install_snapshot(Snapshot.decode(bin), state)
-    |> same_fsm_state()
+    |> keep_fsm_state()
   end
-  def follower(_event, state) do
-    same_fsm_state(state) # neglect `:heartbeat_timeout`, `cannot_reach_quorum`,
+  def follower(:cast, msg, state) do
+    # neglect `:heartbeat_timeout`, `cannot_reach_quorum`
+    handle_cast_common(msg, :follower, state)
   end
 
-  def follower(_event, _from, %State{members: members} = state) do
+  def follower({:call, from}, msg, state) do
     # non-leader rejects synchronous events: `{:command, arg, cmd_id}`, `{:query, arg}`, `{:change_config, new_config}`, `{:add_follower, pid}`, `{:remove_follower, pid}`, `{:replace_leader, new_leader}`
-    same_fsm_state_reply(state, {:error, {:not_leader, members.leader}})
+    handle_call_common(msg, from, :follower, state)
+  end
+
+  def follower(:info, msg, state) do
+    handle_info_common(msg, :follower, state)
   end
 
   defp become_follower_if_new_term_started(%{term: term} = rpc,
@@ -536,9 +552,9 @@ defmodule RaftedValue.Server do
                                            else_fn) do
     if term > current_term do
       new_state = convert_state_as_follower(state, term)
-      # process the given RPC message as a follower
+      # process the given RPC message as a follower using :next_event action
       # (there are cases where `election.timer` started right above will be immediately resetted in `follower/2` but it's rare)
-      follower(rpc, new_state)
+      {:next_state, :follower, new_state, [{:next_event, :cast, rpc}]}
     else
       else_fn.()
     end
@@ -571,8 +587,7 @@ defmodule RaftedValue.Server do
   #
   defp handle_append_entries_request(%AppendEntriesRequest{term: term, leader_pid: leader_pid, prev_log: prev_log,
                                                            entries: entries, i_leader_commit: i_leader_commit, leader_timestamp: leader_timestamp},
-                                     %State{members: members, current_term: current_term, logs: logs, persistence: persistence} = state,
-                                     current_state_name) do
+                                     %State{members: members, current_term: current_term, logs: logs, persistence: persistence} = state) do
     reply_as_failure = fn larger_term ->
       send_event(state, leader_pid, %AppendEntriesResponse{from: self(), term: larger_term, success: false, leader_timestamp: leader_timestamp})
     end
@@ -580,7 +595,7 @@ defmodule RaftedValue.Server do
     if term < current_term do
       # AppendEntries from leader for older term => reject
       reply_as_failure.(current_term)
-      next_state(state, current_state_name)
+      keep_fsm_state(state)
     else
       if Logs.contain_given_prev_log?(logs, prev_log) do
         {new_logs, new_members1, entries_to_apply, entries_to_persist} =
@@ -597,7 +612,7 @@ defmodule RaftedValue.Server do
         new_members = Members.put_leader(members, leader_pid)
         %State{state | members: new_members, current_term: term}
       end
-      |> reset_election_timer_on_leader_message
+      |> reset_election_timer_on_leader_message()
       |> next_state(:follower)
     end
   end
@@ -628,38 +643,34 @@ defmodule RaftedValue.Server do
     end
   end
 
-  #
-  # other callbacks
-  #
-  def handle_event(_event, state_name, state) do
-    next_state(state, state_name)
+  defp handle_cast_common(_event, _state_name, state) do
+    keep_fsm_state(state)
   end
 
-  def handle_sync_event({:snapshot_created, path, term, index, size}, _from, state_name, %State{persistence: persistence} = state) do
+  defp handle_call_common({:snapshot_created, path, term, index, size}, from, _state_name, %State{persistence: persistence} = state) do
     snapshot_meta   = %Persistence.SnapshotMetadata{path: path, term: term, last_committed_index: index, size: size}
     new_persistence = %Persistence{persistence | latest_snapshot_metadata: snapshot_meta}
     new_state       = %State{state | persistence: new_persistence}
-    {:reply, :ok, state_name, new_state}
+    keep_fsm_state_and_reply(new_state, from, :ok)
   end
-
-  def handle_sync_event({:force_remove_member, member_to_remove}, _from, state_name, %State{members: members} = state) do
+  defp handle_call_common({:force_remove_member, member_to_remove}, from, _state_name, %State{members: members} = state) do
     if members.leader do
-      {:reply, {:error, :leader_exists}, state_name, state}
+      keep_fsm_state_and_reply(state, from, {:error, :leader_exists})
     else
       # There are cases where removing a member can trigger state transition (e.g. candidate => leader).
       # To make things simpler, we defer those state transitions to next timer event (e.g. next election timeout).
       new_members = Members.force_remove_member(members, member_to_remove)
       new_state   = %State{state | members: new_members}
-      {:reply, :ok, state_name, new_state}
+      keep_fsm_state_and_reply(new_state, from, :ok)
     end
   end
-  def handle_sync_event(_event, _from, state_name, %State{members: members, current_term: current_term, leadership: leadership, config: config} = state) do
+  defp handle_call_common(:status, from, state_name, %State{members: members, current_term: current_term, leadership: leadership, config: config} = state) do
     unresponsive_followers =
       case state_name do
         :leader -> Leadership.unresponsive_followers(leadership, members, config)
         _       -> []
       end
-    result = %{
+    reply = %{
       from:                   self(),
       members:                PidSet.to_list(members.all),
       leader:                 members.leader,
@@ -668,14 +679,37 @@ defmodule RaftedValue.Server do
       state_name:             state_name,
       config:                 config,
     }
-    {:reply, result, state_name, state}
+    keep_fsm_state_and_reply(state, from, reply)
+  end
+  defp handle_call_common(_event, from, state_name, state) do
+    reason =
+      case state_name do
+        :leader -> :unexpected_message
+        _       -> {:not_leader, state.members.leader}
+      end
+    keep_fsm_state_and_reply(state, from, {:error, reason})
   end
 
-  def handle_info({:DOWN, _ref, :process, _pid, _reason}, state_name, %State{persistence: persistence} = state) do
+  def handle_info_common({:DOWN, _ref, :process, _pid, _reason}, state_name, %State{persistence: persistence} = state) do
     %State{state | persistence: %Persistence{persistence | snapshot_writer: nil}}
     |> next_state(state_name)
   end
-  def handle_info(_info, state_name, state) do
+  def handle_info_common({:"$gen_sync_all_state_event", from, msg}, state_name, state) do
+    handle_call_common(msg, from, state_name, state)
+  end
+  def handle_info_common({:"$gen_sync_event", from, msg}, state_name, state) do
+    apply(__MODULE__, state_name, [{:call, from}, msg, state])
+  end
+  def handle_info_common({:"$gen_event", msg}, state_name, state) do
+    apply(__MODULE__, state_name, [:cast, msg, state])
+  end
+  def handle_info_common({:"$gen_all_state_event", msg}, state_name, state) do
+    apply(__MODULE__, state_name, [:cast, msg, state])
+  end
+  def handle_info_common({:timeout, _ref, {:"$gen_event", msg}}, state_name, state) do
+    apply(__MODULE__, state_name, [:cast, msg, state])
+  end
+  def handle_info_common(_msg, state_name, state) do
     next_state(state, state_name)
   end
 

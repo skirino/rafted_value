@@ -75,8 +75,8 @@ defmodule RaftedValue do
 
   defp start_link_impl(info, options) do
     case Keyword.pop(options, :name) do
-      {nil , options2} -> :gen_fsm.start_link(                Server, {info, options2}, [])
-      {name, options2} -> :gen_fsm.start_link({:local, name}, Server, {info, options2}, [])
+      {nil , options2} -> :gen_statem.start_link(                Server, {info, options2}, [])
+      {name, options2} -> :gen_statem.start_link({:local, name}, Server, {info, options2}, [])
     end
   end
 
