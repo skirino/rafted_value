@@ -127,7 +127,7 @@ defmodule RaftedValue.Persistence do
       [{_, path}, {i_next, _}] -> {path, i_next - 1}
       [{_, path}, nil        ] -> {path, :infinity } # atom is larger than any integers
     end)
-    |> Enum.partition(fn {_, i} -> i < i_committed end)
+    |> Enum.split_with(fn {_, i} -> i < i_committed end)
   end
 
   defun read_last_log_index(dir :: Path.t) :: nil | LogIndex.t do
