@@ -8,8 +8,8 @@ defmodule RaftedValue.CommandResults do
     _ -> {:error, {:invalid_value, [__MODULE__]}}
   end
 
-  defun new :: t do
-    {:queue.new, %{}}
+  defun new() :: t do
+    {:queue.new(), %{}}
   end
 
   defun fetch({_q, m} :: t, cmd_id :: cmd_id) :: {:ok, any} | :error do

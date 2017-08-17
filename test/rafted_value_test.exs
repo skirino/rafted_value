@@ -726,7 +726,7 @@ defmodule RaftedValueTest do
     context =
       %{working: initial_members, killed: [], isolated: [], current_leader: leader, leaders: %{}, term_numbers: %{}, commit_indices: %{}, leader_commit_index: 0, data: %{}, persistence_base_dir: persistence_base_dir}
       |> assert_invariants()
-    client_pid = spawn_link(fn -> client_process_loop(initial_members, JustAnInt.new) end)
+    client_pid = spawn_link(fn -> client_process_loop(initial_members, JustAnInt.new()) end)
     {context, client_pid}
   end
 
