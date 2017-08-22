@@ -2,7 +2,6 @@ use Croma
 
 defmodule RaftedValue.Timer do
   defun make(time :: non_neg_integer, msg :: any) :: reference do
-#    :erlang.start_timer(time, self(), {:"$gen_cast", msg})
     :erlang.send_after(time, self(), {:"$gen_cast", msg})
   end
 

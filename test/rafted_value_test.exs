@@ -517,7 +517,7 @@ defmodule RaftedValueTest do
     member_state_pairs = Enum.map(members_alive, fn m -> {m, :sys.get_state(m)} end)
     new_context =
       Enum.reduce(member_state_pairs, context, fn({member, {state_name, state}}, context0) ->
-        {:ok, _} = RaftedValue.Server.State.validate(state)
+        assert RaftedValue.Server.State.valid?(state)
         assert_server_state_invariants(member, state_name, state)
         assert_server_logs_invariants(state.logs, state.persistence)
         assert_server_persistence_invariants(state.logs, state.persistence)

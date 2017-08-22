@@ -3,9 +3,9 @@ use Croma
 defmodule RaftedValue.CommandResults do
   @type cmd_id :: RaftedValue.command_identifier
   @type t :: {:queue.queue(cmd_id), %{cmd_id => any}}
-  defun validate(v :: any) :: Croma.Result.t(t) do
-    {{l1, l2}, m} = t when is_list(l1) and is_list(l2) and is_map(m) -> {:ok, t}
-    _ -> {:error, {:invalid_value, [__MODULE__]}}
+  defun valid?(v :: any) :: boolean do
+    {{l1, l2}, m} when is_list(l1) and is_list(l2) and is_map(m) -> true
+    _ -> false
   end
 
   defun new() :: t do

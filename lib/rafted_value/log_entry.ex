@@ -1,5 +1,4 @@
 use Croma
-alias Croma.Result, as: R
 
 defmodule RaftedValue.LogEntry do
   alias RaftedValue.{TermNumber, LogIndex, Config}
@@ -11,9 +10,9 @@ defmodule RaftedValue.LogEntry do
            | {TermNumber.t, LogIndex.t, :remove_follower   , pid}
            | {TermNumber.t, LogIndex.t, :restore_from_files, pid}
 
-  defun validate(v :: any) :: R.t(t) do
-    {_, _, _, _} = t -> {:ok, t}
-    _                -> {:error, {:invalid_value, [__MODULE__]}}
+  defun valid?(v :: any) :: boolean do
+    {_, _, _, _} -> true
+    _            -> false
   end
 
   defp entry_type_to_tag(:command           ), do: 0

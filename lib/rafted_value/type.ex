@@ -33,10 +33,7 @@ end
 
 defmodule RaftedValue.Monotonic do
   @type t :: integer
-  defun validate(v :: term) :: Croma.Result.t(t) do
-    i when is_integer(i) -> {:ok, i}
-    _                    -> {:error, {:invalid_value, [__MODULE__]}}
-  end
+  defun valid?(v :: term) :: boolean, do: is_integer(v)
 
   defun millis() :: t do
     System.monotonic_time(:milliseconds)
