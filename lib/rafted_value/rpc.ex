@@ -47,7 +47,6 @@ defmodule RaftedValue.RPC do
       members:              Members,
       term:                 TermNumber,
       last_committed_entry: LogEntry,
-      config:               Config,
       data:                 Croma.Any,
       command_results:      CommandResults,
     ]
@@ -55,7 +54,8 @@ defmodule RaftedValue.RPC do
 
   defmodule InstallSnapshotCompressed do
     use Croma.Struct, fields: [
-      bin: Croma.Binary,
+      consensus_bin: Croma.Binary,
+      value_io_pid: Croma.Binary,
     ]
   end
 

@@ -49,7 +49,7 @@ defmodule RaftedValue.PersistenceAndRecoveryTest do
   end
 
   defp read_snapshot(path) do
-    File.read!(path) |> Snapshot.decode()
+    Persistence.read_lastest_snapshot_from_dir(@config, path)
   end
 
   defp snapshot_path_to_committed_index(path) do
@@ -90,7 +90,7 @@ defmodule RaftedValue.PersistenceAndRecoveryTest do
 
   test "uncommitted logs should be committed by lonely leader immediately after recovery" do
     {:ok, l} = RaftedValue.start_link({:create_new_consensus_group, @config}, [persistence_dir: @tmp_dir])
-    {:ok, f} = RaftedValue.start_link({:join_existing_consensus_group, [l]})
+    {:ok, f} = RaftedValue.start_link({:join_existing_consensus_group, [l], @config})
     assert MapSet.new(RaftedValue.status(l).members) == MapSet.new([l, f])
     assert :gen_statem.stop(f) == :ok
 
@@ -110,7 +110,7 @@ defmodule RaftedValue.PersistenceAndRecoveryTest do
     dir_l = Path.join(@tmp_dir, "l")
     dir_f = Path.join(@tmp_dir, "f")
     {:ok, l} = RaftedValue.start_link({:create_new_consensus_group, @config}, [persistence_dir: dir_l])
-    {:ok, f} = RaftedValue.start_link({:join_existing_consensus_group, [l]} , [persistence_dir: dir_f])
+    {:ok, f} = RaftedValue.start_link({:join_existing_consensus_group, [l], @config} , [persistence_dir: dir_f])
 
     # In case leader hasn't received AppendEntriesResponse from the follower, the leader re-sends part of log entries.
     # (This can happen also in non-persisting setup but is much more frequent in persisting setup as followers must flush log entries before replying to its leader)
@@ -129,14 +129,14 @@ defmodule RaftedValue.PersistenceAndRecoveryTest do
     dir_l = Path.join(@tmp_dir, "l")
     dir_f = Path.join(@tmp_dir, "f")
     {:ok, l1} = RaftedValue.start_link({:create_new_consensus_group, @config}, [persistence_dir: dir_l])
-    {:ok, f1} = RaftedValue.start_link({:join_existing_consensus_group, [l1]} , [persistence_dir: dir_f])
+    {:ok, f1} = RaftedValue.start_link({:join_existing_consensus_group, [l1], @config} , [persistence_dir: dir_f])
     assert Enum.sort(RaftedValue.status(l1).members) == Enum.sort([l1, f1])
     assert Enum.sort(RaftedValue.status(f1).members) == Enum.sort([l1, f1])
     assert :gen_statem.stop(f1) == :ok
     assert :gen_statem.stop(l1) == :ok
 
     {:ok, l2} = RaftedValue.start_link({:create_new_consensus_group, @config}, [persistence_dir: dir_l])
-    {:ok, f2} = RaftedValue.start_link({:join_existing_consensus_group, [l2]}, [persistence_dir: dir_f])
+    {:ok, f2} = RaftedValue.start_link({:join_existing_consensus_group, [l2], @config}, [persistence_dir: dir_f])
     assert Enum.sort(RaftedValue.status(l2).members) == Enum.sort([l2, f2])
     assert Enum.sort(RaftedValue.status(f2).members) == Enum.sort([l2, f2])
     assert :gen_statem.stop(f2) == :ok
@@ -149,7 +149,7 @@ defmodule RaftedValue.PersistenceAndRecoveryTest do
       assert RaftedValue.command(n1, :inc) == {:ok, i}
     end)
     # send snapshot: `n1` => `p1`
-    {:ok, p1} = RaftedValue.start_link({:join_existing_consensus_group, [n1]}, [persistence_dir: @tmp_dir])
+    {:ok, p1} = RaftedValue.start_link({:join_existing_consensus_group, [n1], @config}, [persistence_dir: @tmp_dir])
     Enum.each(11 .. 20, fn i ->
       assert RaftedValue.command(n1, :inc) == {:ok, i}
     end)
@@ -162,7 +162,7 @@ defmodule RaftedValue.PersistenceAndRecoveryTest do
       assert RaftedValue.command(p2, :inc) == {:ok, i}
     end)
     # send snapshot: `p2` => `n2`
-    {:ok, n2} = RaftedValue.start_link({:join_existing_consensus_group, [p2]})
+    {:ok, n2} = RaftedValue.start_link({:join_existing_consensus_group, [p2], @config})
     Enum.each(31 .. 40, fn i ->
       assert RaftedValue.command(p2, :inc) == {:ok, i}
     end)

@@ -24,7 +24,6 @@ defmodule RaftedValue.Server do
   #   - defined in Raft (client-to-leader messages)
   #     - {:command, arg, cmd_id}
   #     - {:query, arg}
-  #     - {:change_config, new_config}
   #     - {:add_follower, pid}
   #     - {:remove_follower, pid}
   #     - {:replace_leader, new_leader}
@@ -59,7 +58,7 @@ defmodule RaftedValue.Server do
   #   (note that this is basically equivalent to implicitly establish client session for each request)
   #
 
-  alias RaftedValue.{TermNumber, PidSet, Members, Leadership, Election, Logs, CommandResults, Config, Persistence, Snapshot, Monotonic}
+  alias RaftedValue.{TermNumber, PidSet, Members, Leadership, Election, Logs, CommandResults, Config, Persistence, Snapshot, SnapConsensus, Monotonic}
   alias RaftedValue.RPC.{
     AppendEntriesRequest,
     AppendEntriesResponse,
@@ -107,55 +106,59 @@ defmodule RaftedValue.Server do
     {:ok, :leader, initialize_leader_state(config, options)}
   end
 
-  def init({{:join_existing_consensus_group, known_members}, options}) do
-    {:ok, :follower, initialize_follower_state(known_members, options)}
+  def init({{:join_existing_consensus_group, known_members, config}, options}) do
+    {:ok, :follower, initialize_follower_state(config, known_members, options)}
   end
 
   defunp initialize_leader_state(config :: Config.t, options :: [RaftedValue.option]) :: State.t do
     case Keyword.get(options, :persistence_dir) do
       nil ->
         snapshot = generate_empty_snapshot_for_lonely_leader(config)
-        logs     = Logs.new_for_lonely_leader(snapshot.last_committed_entry, [])
-        build_state_from_snapshot(snapshot, logs, nil)
+        logs     = Logs.new_for_lonely_leader(snapshot.consensus.last_committed_entry, [])
+        build_state_from_snapshot(snapshot, config, logs, nil)
       dir ->
         log_expansion_factor = Keyword.fetch!(options, :log_file_expansion_factor)
-        case Snapshot.read_lastest_snapshot_and_logs_if_available(dir) do
+        case Snapshot.read_lastest_snapshot_and_logs_if_available(config, dir) do
           nil ->
             snapshot    = generate_empty_snapshot_for_lonely_leader(config)
-            logs        = Logs.new_for_lonely_leader(snapshot.last_committed_entry, [])
-            persistence = Persistence.new_with_initial_snapshotting(dir, log_expansion_factor, snapshot)
-            build_state_from_snapshot(snapshot, logs, persistence)
+            logs        = Logs.new_for_lonely_leader(snapshot.consensus.last_committed_entry, [])
+            persistence = Persistence.new_with_initial_snapshotting(config, dir, log_expansion_factor, snapshot)
+            build_state_from_snapshot(snapshot, config, logs, persistence)
           {snapshot_from_disk, snapshot_meta, log_entries} ->
             # In this case we neglect `config` given in the argument to `RaftedValue.start_link/2`.
             # On the other hand we discard `members` obtained from disk, as `self()` is the sole member of this newly-spawned consensus group.
             members                   = Members.new_for_lonely_leader()
-            snapshot                  = %Snapshot{snapshot_from_disk | members: members}
-            logs1                     = Logs.new_for_lonely_leader(snapshot.last_committed_entry, log_entries)
-            {logs2, entry_restore}    = Logs.add_entry_on_restored_from_files(logs1, snapshot.term)
+            consensus                 = %SnapConsensus{snapshot_from_disk.consensus | members: members}
+            snapshot                  = %Snapshot{snapshot_from_disk | consensus: consensus}
+            logs1                     = Logs.new_for_lonely_leader(consensus.last_committed_entry, log_entries)
+            {logs2, entry_restore}    = Logs.add_entry_on_restored_from_files(logs1, consensus.term)
             persistence               = Persistence.new_with_disk_snapshot(dir, log_expansion_factor, snapshot_meta, entry_restore)
             {logs3, entries_to_apply} = Logs.commit_to_latest(logs2, persistence)
-            state                     = build_state_from_snapshot(snapshot, logs3, persistence)
+            state                     = build_state_from_snapshot(snapshot, config, logs3, persistence)
             Enum.reduce(entries_to_apply, state, &leader_apply_committed_log_entry_without_membership_change/2) # `entry_restore` results in a no-op and thus neglected
         end
     end
   end
 
-  defunp generate_empty_snapshot_for_lonely_leader(config :: Config.t) :: Snapshot.t do
+  defp generate_empty_snapshot_for_lonely_leader(%Config{data_module: data_module,
+                                                         data_environment: data_environment}) do
     %Snapshot{
-      members:              Members.new_for_lonely_leader(),
-      term:                 0,
-      last_committed_entry: {0, 1, :leader_elected, self()},
-      data:                 config.data_module.new(),
-      command_results:      CommandResults.new(),
-      config:               config,
+      consensus: %SnapConsensus{
+        members:              Members.new_for_lonely_leader(),
+        term:                 0,
+        last_committed_entry: {0, 1, :leader_elected, self()},     
+        command_results:      CommandResults.new()
+      },
+      data: data_module.new(data_environment)
     }
   end
 
-  defunp build_state_from_snapshot(%Snapshot{members:         members,
-                                             term:            term,
-                                             data:            data,
-                                             command_results: command_results,
-                                             config:          config},
+  defunp build_state_from_snapshot(%Snapshot{data:            data,
+                                             consensus: %SnapConsensus{
+                                               term:            term,
+                                               members:         members,
+                                               command_results: command_results}},
+                                   config      ::Config.t,
                                    logs        :: Logs.t,
                                    persistence :: nil | Persistence.t) :: State.t do
     %State{
@@ -171,9 +174,13 @@ defmodule RaftedValue.Server do
     }
   end
 
-  defunp initialize_follower_state(known_members :: [GenServer.server], options :: [RaftedValue.option]) :: State.t do
-    %Snapshot{members: members, term: term, last_committed_entry: last_entry, data: data, command_results: command_results, config: config} = snapshot =
-      call_add_server_with_fault_injection(known_members, options)
+  defunp initialize_follower_state(config :: Config.t, known_members :: [GenServer.server], options :: [RaftedValue.option]) :: State.t do
+    snapshot = call_add_server_with_fault_injection(config, known_members, options)
+    %Snapshot{data: data, 
+              consensus: %SnapConsensus{members: members,
+                                        term: term,
+                                        last_committed_entry: last_entry,
+                                        command_results: command_results}} = snapshot
     logs        = Logs.new_for_new_follower(last_entry)
     election    = Election.new_for_follower(config)
     persistence =
@@ -181,13 +188,13 @@ defmodule RaftedValue.Server do
         nil -> nil
         dir ->
           log_expansion_factor = Keyword.fetch!(options, :log_file_expansion_factor)
-          Persistence.new_with_snapshot_sent_from_leader(dir, log_expansion_factor, snapshot)
+          Persistence.new_with_snapshot_sent_from_leader(config, dir, log_expansion_factor, snapshot)
       end
     %State{members: members, current_term: term, election: election, logs: logs, data: data, command_results: command_results, config: config, persistence: persistence}
   end
 
-  defunp call_add_server_with_fault_injection(known_members :: [GenServer.server], options :: [RaftedValue.option]) :: Snapshot.t do
-    snapshot = call_add_server_and_reraise_with_pid(known_members)
+  defunp call_add_server_with_fault_injection(config :: Config.t, known_members :: [GenServer.server], options :: [RaftedValue.option]) :: Snapshot.t do
+    snapshot = call_add_server_and_reraise_with_pid(config, known_members)
     # The following is solely for testing
     case Keyword.get(options, :test_inject_fault_after_add_follower) do
       :raise   -> raise RaftedValue.AddFollowerError, [message: "simulated error in RaftedValue.Server.call_add_server_with_fault_injection/2", pid: self()]
@@ -196,9 +203,9 @@ defmodule RaftedValue.Server do
     end
   end
 
-  defunp call_add_server_and_reraise_with_pid(known_members :: [GenServer.server]) :: Snapshot.t do
+  defunp call_add_server_and_reraise_with_pid(config :: Config.t, known_members :: [GenServer.server]) :: Snapshot.t do
     try do
-      call_add_server(known_members)
+      call_add_server(config, known_members)
     rescue
       e ->
         # Pass `self()` to caller of `Supervisor.start_child/2` for cleanup of consensus group
@@ -207,17 +214,20 @@ defmodule RaftedValue.Server do
     end
   end
 
-  defunp call_add_server(known_members :: [GenServer.server]) :: Snapshot.t do
-    []       -> raise "no leader found"
-    [m | ms] ->
-      case call_add_server_one(m) do
-        {:ok, %InstallSnapshot{} = is}              -> Snapshot.from_install_snapshot(is)
-        {:ok, %InstallSnapshotCompressed{bin: bin}} -> Snapshot.decode(bin)
-        {:error, {:not_leader, nil}}                -> call_add_server(ms)
-        {:error, {:not_leader, leader}}             -> call_add_server([leader | List.delete(ms, leader)])
-        {:error, :noproc}                           -> call_add_server(ms)
-        # {:error, :uncommitted_membership_change} results in an error
-      end
+  defunp call_add_server(config :: Config.t, known_members :: [GenServer.server]) :: Snapshot.t do
+    case known_members do
+      []       -> raise "no leader found"
+      [m | ms] ->
+        case call_add_server_one(m) do
+          {:ok, %InstallSnapshot{} = is}              -> Snapshot.from_install_snapshot(config, is)
+          {:ok, %InstallSnapshotCompressed{} = cs}    -> Snapshot.from_compressed_snapshot(config, cs)
+          {:error, {:not_leader, nil}}                -> call_add_server(config, ms)
+          {:error, {:not_leader, leader}}             -> call_add_server(config, [leader | List.delete(ms, leader)])
+          {:error, :noproc}                           -> call_add_server(config, ms)
+          # {:error, :uncommitted_membership_change} results in an error
+        end
+    end
+
   end
 
   defp call_add_server_one(maybe_leader) do
@@ -304,14 +314,6 @@ defmodule RaftedValue.Server do
       keep_fsm_state(state)
     end
   end
-  def leader({:call, from},
-             {:change_config, new_config},
-             %State{current_term: term, logs: logs, persistence: persistence} = state) do
-    {new_logs, entry} = Logs.add_entry(logs, persistence, fn index -> {term, index, :change_config, new_config} end)
-    %State{state | logs: new_logs}
-    |> persist_log_entries([entry])
-    |> keep_fsm_state_and_reply(from, :ok)
-  end
 
   def leader({:call, from},
              {:add_follower, new_follower},
@@ -375,6 +377,7 @@ defmodule RaftedValue.Server do
   def become_leader(%State{members: members, current_term: term, logs: logs, config: config, persistence: persistence} = state) do
     leadership = Leadership.new_for_leader(config)
     {new_logs, entry} = Logs.add_entry_on_elected_leader(logs, members, term, persistence)
+    
     %State{state | members: Members.put_leader(members, self()), leadership: leadership, logs: new_logs}
     |> persist_log_entries([entry])
     |> broadcast_append_entries()
@@ -453,7 +456,7 @@ defmodule RaftedValue.Server do
   end
 
   def candidate({:call, from}, msg, state) do
-    # non-leader rejects synchronous events: `{:command, arg, cmd_id}`, `{:query, arg}`, `{:change_config, new_config}`, `{:add_follower, pid}`, `{:remove_follower, pid}`, `{:replace_leader, new_leader}`
+    # non-leader rejects synchronous events: `{:command, arg, cmd_id}`, `{:query, arg}`, `{:add_follower, pid}`, `{:remove_follower, pid}`, `{:replace_leader, new_leader}`
     handle_call_common(msg, from, :candidate, state)
   end
 
@@ -525,12 +528,14 @@ defmodule RaftedValue.Server do
   def follower(:cast, :remove_follower_completed, state) do
     {:stop, :normal, state}
   end
-  def follower(:cast, %InstallSnapshot{} = rpc, state) do
-    handle_install_snapshot(Snapshot.from_install_snapshot(rpc), state)
+  def follower(:cast, %InstallSnapshot{} = rpc, %State{config: config} = state) do
+    Snapshot.from_install_snapshot(config, rpc)
+    |> handle_install_snapshot(state)
     |> keep_fsm_state()
   end
-  def follower(:cast, %InstallSnapshotCompressed{bin: bin}, state) do
-    handle_install_snapshot(Snapshot.decode(bin), state)
+  def follower(:cast, %InstallSnapshotCompressed{} = is, %State{config: config} = state) do
+    Snapshot.from_compressed_snapshot(config, is)
+    |> handle_install_snapshot(state)
     |> keep_fsm_state()
   end
   def follower(:cast, msg, state) do
@@ -539,7 +544,7 @@ defmodule RaftedValue.Server do
   end
 
   def follower({:call, from}, msg, state) do
-    # non-leader rejects synchronous events: `{:command, arg, cmd_id}`, `{:query, arg}`, `{:change_config, new_config}`, `{:add_follower, pid}`, `{:remove_follower, pid}`, `{:replace_leader, new_leader}`
+    # non-leader rejects synchronous events: `{:command, arg, cmd_id}`, `{:query, arg}`, `{:add_follower, pid}`, `{:remove_follower, pid}`, `{:replace_leader, new_leader}`
     handle_call_common(msg, from, :follower, state)
   end
 
@@ -568,13 +573,14 @@ defmodule RaftedValue.Server do
     %State{state | members: new_members, current_term: new_term, leadership: nil, election: new_election}
   end
 
-  defunp handle_install_snapshot(%Snapshot{members:              members,
-                                           term:                 term,
-                                           last_committed_entry: last_entry,
-                                           data:                 data,
-                                           command_results:      command_results} = snapshot,
+  defunp handle_install_snapshot(%Snapshot{data:                 data,
+                                           consensus: %SnapConsensus{
+                                              members:              members,
+                                              term:                 term,
+                                              last_committed_entry: last_entry,
+                                              command_results:      command_results} = consensus} = snapshot,
                                  %State{persistence: persistence} = state) :: State.t do
-    become_follower_if_new_term_started(snapshot, state, fn ->
+    become_follower_if_new_term_started(consensus, state, fn ->
       new_logs        = Logs.new_for_new_follower(last_entry)
       new_persistence = if is_nil(persistence), do: nil, else: Persistence.unset_snapshot_metadata(persistence) # invalidate existing snapshot file
       %State{state | members: members, current_term: term, logs: new_logs, data: data, command_results: command_results, persistence: new_persistence}
@@ -744,8 +750,6 @@ defmodule RaftedValue.Server do
       {_term, _index, :query, tuple} ->
         run_query(state, tuple)
         state
-      {_term, _index, :change_config, new_config} ->
-        %State{state | config: new_config}
       {_term, _index, :leader_elected, leader_pid} ->
         if leader_pid == self(), do: hook.on_elected(data)
         state
@@ -767,7 +771,6 @@ defmodule RaftedValue.Server do
     case entry do
       {_term, _index, :command                 , tuple     } -> run_command(state, tuple, true)
       {_term, _index, :query                   , tuple     } -> run_query(state, tuple); state
-      {_term, _index, :change_config           , new_config} -> %State{state | config: new_config}
       {_term, _index, _add_or_remove_or_restore, _         } -> state
     end
   end
@@ -775,7 +778,6 @@ defmodule RaftedValue.Server do
   defunp nonleader_apply_committed_log_entry(entry :: LogEntry.t, %State{members: members} = state) :: State.t do
     case entry do
       {_term, _index, :command                    , tuple        } -> run_command(state, tuple, false)
-      {_term, _index, :change_config              , new_config   } -> %State{state | config: new_config}
       {_term, index , :add_follower               , _follower_pid} -> %State{state | members: Members.membership_change_committed(members, index)}
       {_term, index , :remove_follower            , _follower_pid} -> %State{state | members: Members.membership_change_committed(members, index)}
       {_term, _index, _query_or_elected_or_restore, _            } -> state
@@ -809,7 +811,7 @@ defmodule RaftedValue.Server do
   #
   # utilities (persisting logs and snapshots)
   #
-  defunp persist_log_entries(%State{logs: logs, persistence: persistence0} = state, entries :: [LogEntry.t]) :: State.t do
+  defunp persist_log_entries(%State{logs: logs, persistence: persistence0, config: config} = state, entries :: [LogEntry.t]) :: State.t do
     if is_nil(persistence0) or Enum.empty?(entries) do
       state
     else
@@ -817,7 +819,7 @@ defmodule RaftedValue.Server do
       persistence2 =
         if Persistence.log_compaction_runnable?(persistence1) do
           index_next = logs.i_max + 1
-          Persistence.switch_log_file_and_spawn_snapshot_writer(persistence1, make_snapshot(state), index_next)
+          Persistence.switch_log_file_and_spawn_snapshot_writer(persistence1, config, make_snapshot(state), index_next)
         else
           persistence1
         end
@@ -825,19 +827,22 @@ defmodule RaftedValue.Server do
     end
   end
 
-  defunp make_snapshot(%State{members: members, current_term: term, logs: logs, data: data, command_results: command_results, config: config}) :: Snapshot.t do
+  defunp make_snapshot(%State{members: members, current_term: term, logs: logs, data: data, command_results: command_results}) :: Snapshot.t do
     last_entry = Logs.last_committed_entry(logs)
-    %Snapshot{members: members, term: term, last_committed_entry: last_entry, data: data, command_results: command_results, config: config}
+    %Snapshot{data: data,
+              consensus: %SnapConsensus{members: members, term: term, last_committed_entry: last_entry, command_results: command_results}}
   end
 
-  defunp make_install_snapshot(%State{members: members, current_term: term, logs: logs, data: data, command_results: command_results, config: config}) :: InstallSnapshot.t do
+  defunp make_install_snapshot(%Config{data_module: data_module},
+                               %State{members: members, current_term: term, logs: logs, data: data, command_results: command_results}) :: InstallSnapshot.t do
     last_entry = Logs.last_committed_entry(logs)
-    %InstallSnapshot{members: members, term: term, last_committed_entry: last_entry, data: data, command_results: command_results, config: config}
+    snapshotted_data = data_module.to_snapshot(data)
+    %InstallSnapshot{members: members, term: term, last_committed_entry: last_entry, data: snapshotted_data, command_results: command_results}
   end
 
   defunp send_snapshot(%State{members:     members,
                               logs:        logs,
-                              config:      %Config{communication_module: mod},
+                              config:      %Config{communication_module: mod} = config,
                               persistence: persistence} = state,
                        follower :: pid,
                        send_fun :: ((module, InstallSnapshot.t | InstallSnapshotCompressed.t) -> :ok)) :: State.t do
@@ -846,11 +851,15 @@ defmodule RaftedValue.Server do
     case persistence do
       %Persistence{latest_snapshot_metadata: %Persistence.SnapshotMetadata{path: path} = meta} ->
         spawn(fn ->
-          send_fun.(mod, %InstallSnapshotCompressed{bin: File.read!(path)})
+          value_path     = Persistence.value_path(path)
+          consensus_path = Persistence.consensus_path(path)
+          consensus_bin  = File.read!(consensus_path)
+          {:ok, pid} = RaftedValue.Transfer.start_link(value_path)
+          send_fun.(mod, %InstallSnapshotCompressed{consensus_bin: consensus_bin, value_io_pid: pid})
         end)
         %State{state | logs: Logs.set_follower_index_as_snapshot_last_index(logs, members, follower, meta)}
       _ ->
-        send_fun.(mod, make_install_snapshot(state))
+        send_fun.(mod, make_install_snapshot(config, state))
         state
     end
   end

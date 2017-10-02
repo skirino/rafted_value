@@ -51,7 +51,7 @@ Load the following module in all nodes.
 ```ex
 defmodule QueueWithLength do
   @behaviour RaftedValue.Data
-  def new, do: {:queue.new(), 0}
+  def new(_), do: {:queue.new(), 0}
   def command({q, l}, {:enqueue, v}) do
     {l, {:queue.in(v, q), l + 1}}
   end
@@ -60,6 +60,8 @@ defmodule QueueWithLength do
     {v, {q2, l - 1}}
   end
   def query({_, l}, :length), do: l
+  def to_snapshot(i), do: i
+  def from_snapshot(i, _env), do: i
 end
 ```
 
