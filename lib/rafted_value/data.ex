@@ -65,11 +65,11 @@ defmodule RaftedValue.Data do
   When sending snapshots to other nodes, only the file at path will be transfered.
   If your snapshot depends on multiple files, zip them up.
   """
-  @callback to_disk(data, path) :: :ok
+  @callback to_disk(data, Path.t()) :: :ok
 
   @doc """
   Read a snapshot at the path `path`.
   This is used when persistence is off.
   """
-  @callback from_disk(path, data_environment) :: data
+  @callback from_disk(Path.t(), data_environment) :: data
 end
