@@ -120,11 +120,12 @@ defmodule RaftedValue.Server do
         build_state_from_snapshot(snapshot, config, logs, nil)
       dir ->
         log_expansion_factor = Keyword.fetch!(options, :log_file_expansion_factor)
+        persistence_hook = Keyword.get(options, :persistence_hook, Persistence.PersistenceHookNoOp)
         case Snapshot.read_lastest_snapshot_and_logs_if_available(data_environment, dir) do
           nil ->
             snapshot    = generate_empty_snapshot_for_lonely_leader(data_environment, config)
             logs        = Logs.new_for_lonely_leader(snapshot.consensus.last_committed_entry, [])
-            persistence = Persistence.new_with_initial_snapshotting(dir, log_expansion_factor, snapshot)
+            persistence = Persistence.new_with_initial_snapshotting(dir, log_expansion_factor, persistence_hook, snapshot)
             build_state_from_snapshot(snapshot, config, logs, persistence)
           {snapshot_from_disk, snapshot_meta, log_entries} ->
             # In this case we neglect `config` given in the argument to `RaftedValue.start_link/2`.
@@ -134,7 +135,7 @@ defmodule RaftedValue.Server do
             snapshot                  = %Snapshot{snapshot_from_disk | consensus: consensus}
             logs1                     = Logs.new_for_lonely_leader(consensus.last_committed_entry, log_entries)
             {logs2, entry_restore}    = Logs.add_entry_on_restored_from_files(logs1, consensus.term)
-            persistence               = Persistence.new_with_disk_snapshot(dir, log_expansion_factor, snapshot_meta, entry_restore)
+            persistence               = Persistence.new_with_disk_snapshot(dir, log_expansion_factor, persistence_hook, snapshot_meta, entry_restore)
             {logs3, entries_to_apply} = Logs.commit_to_latest(logs2, persistence)
             state                     = build_state_from_snapshot(snapshot, config, logs3, persistence)
             Enum.reduce(entries_to_apply, state, &leader_apply_committed_log_entry_without_membership_change/2) # `entry_restore` results in a no-op and thus neglected
@@ -191,7 +192,8 @@ defmodule RaftedValue.Server do
         nil -> nil
         dir ->
           log_expansion_factor = Keyword.fetch!(options, :log_file_expansion_factor)
-          Persistence.new_with_snapshot_sent_from_leader(dir, log_expansion_factor, snapshot)
+          hook                 = Keyword.get(options, :persistence_hook, Persistence.PersistenceHookNoOp)
+          Persistence.new_with_snapshot_sent_from_leader(dir, log_expansion_factor, hook, snapshot)
       end
     %State{members: members, current_term: term, election: election, logs: logs, data: data, command_results: command_results, config: config, persistence: persistence}
   end
@@ -662,9 +664,12 @@ defmodule RaftedValue.Server do
   end
 
   defp handle_call_common({:snapshot_created, path, term, index, size}, from, _state_name, %State{persistence: persistence} = state) do
+    
     snapshot_meta   = %Persistence.SnapshotMetadata{path: path, term: term, last_committed_index: index, size: size}
     new_persistence = %Persistence{persistence | latest_snapshot_metadata: snapshot_meta}
     new_state       = %State{state | persistence: new_persistence}
+    %Persistence{hook: hook} = persistence
+    hook.snapshot_created(path, term, index, size)
     keep_fsm_state_and_reply(new_state, from, :ok)
   end
   defp handle_call_common({:force_remove_member, member_to_remove}, from, _state_name, %State{members: members} = state) do

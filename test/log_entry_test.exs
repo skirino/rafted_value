@@ -3,6 +3,7 @@ defmodule RaftedValue.LogEntryTest do
   alias RaftedValue.Persistence
 
   @dir Path.join("tmp", "log_entry_test")
+  @hook nil
 
   setup do
     File.rm_rf!(@dir)
@@ -63,7 +64,7 @@ defmodule RaftedValue.LogEntryTest do
     File.mkdir_p!(@dir)
     initial_entry = {0, 1, :leader_elected, self()}
     meta          = %Persistence.SnapshotMetadata{path: Path.join(@dir, "snapshot_0_1"), term: 0, last_committed_index: 1, size: 100}
-    persistence1  = Persistence.new_with_disk_snapshot(@dir, 10, meta, initial_entry)
+    persistence1  = Persistence.new_with_disk_snapshot(@dir, 10, @hook, meta, initial_entry)
 
     l            = make_entries_list()
     entries      = Enum.map(1..100, fn _ -> Enum.random(l) end)
@@ -79,7 +80,7 @@ defmodule RaftedValue.LogEntryTest do
     index_first   = :rand.uniform(1000)
     initial_entry = {0, index_first, :leader_elected, self()}
     meta          = %Persistence.SnapshotMetadata{path: Path.join(@dir, "snapshot_0_#{index_first}"), term: 0, last_committed_index: 1, size: 100}
-    persistence1  = Persistence.new_with_disk_snapshot(@dir, 10, meta, initial_entry)
+    persistence1  = Persistence.new_with_disk_snapshot(@dir, 10, @hook, meta, initial_entry)
 
     n_entries     = :rand.uniform(10)
     index_last    = index_first + n_entries

@@ -12,8 +12,26 @@ defmodule RaftedValue.Persistence do
     ]
   end
 
+  defmodule PersistenceHook do
+    alias RaftedValue.Snapshot
+    @type neglected      :: any
+    @type path           :: Path.t
+    @type consensus_term :: integer
+    @type index          :: integer
+    @type size           :: integer
+    @doc """
+    Hook to be called when a snapshot is finished.
+    """
+    @callback snapshot_created(path, consensus_term, index, size) :: neglected
+  end
+  defmodule PersistenceHookNoOp do
+    @behaviour 
+    def snapshot_created(_path, _term, _index, _size), do: nil
+  end
+
   use Croma.Struct, fields: [
     dir:                      Croma.String,
+    hook:                     Croma.Atom,
     log_fd:                   Croma.TypeGen.nilable(Croma.Tuple), # This field is `nil` only during initialization (within `new_with_initial_snapshotting/4`)
     log_size_written:         Croma.NonNegInteger,
     log_compaction_rate:      Croma.Number,
@@ -21,23 +39,23 @@ defmodule RaftedValue.Persistence do
     snapshot_writer:          Croma.TypeGen.nilable(Croma.Pid),
   ]
 
-  defun new_with_initial_snapshotting(dir :: Path.t, factor :: number, snapshot :: Snapshot.t) :: t do
+  defun new_with_initial_snapshotting(dir :: Path.t, factor :: number, persistence_hook :: atom, snapshot :: Snapshot.t) :: t do
     File.mkdir_p!(dir)
     {_, index_first, _, _} = entry_elected = snapshot.consensus.last_committed_entry
-    %__MODULE__{dir: dir, log_size_written: 0, log_compaction_rate: factor} # `log_fd` will be filled soon
+    %__MODULE__{dir: dir, log_size_written: 0, log_compaction_rate: factor, hook: persistence_hook} # `log_fd` will be filled soon
     |> switch_log_file_and_spawn_snapshot_writer(snapshot, index_first)
     |> write_log_entries([entry_elected])
   end
 
-  defun new_with_disk_snapshot(dir :: Path.t, factor :: number, meta :: SnapshotMetadata.t, {_, index_first, _, _} = entry_restore :: LogEntry.t) :: t do
-    %__MODULE__{dir: dir, log_fd: open_log_file(dir, index_first), log_size_written: 0, log_compaction_rate: factor, latest_snapshot_metadata: meta}
+  defun new_with_disk_snapshot(dir :: Path.t, factor :: number, persistence_hook :: atom, meta :: SnapshotMetadata.t, {_, index_first, _, _} = entry_restore :: LogEntry.t) :: t do
+    %__MODULE__{dir: dir, log_fd: open_log_file(dir, index_first), log_size_written: 0, log_compaction_rate: factor, hook: persistence_hook, latest_snapshot_metadata: meta}
     |> write_log_entries([entry_restore])
   end
 
-  defun new_with_snapshot_sent_from_leader(dir :: Path.t, factor :: number, snapshot :: Snapshot.t) :: t do
+  defun new_with_snapshot_sent_from_leader(dir :: Path.t, factor :: number, persistence_hook :: atom, snapshot :: Snapshot.t) :: t do
     File.mkdir_p!(dir)
     {_, index_snapshot, _, _} = snapshot.consensus.last_committed_entry
-    %__MODULE__{dir: dir, log_size_written: 0, log_compaction_rate: factor} # `log_fd` will be filled soon
+    %__MODULE__{dir: dir, log_size_written: 0, log_compaction_rate: factor, hook: persistence_hook} # `log_fd` will be filled soon
     |> switch_log_file_and_spawn_snapshot_writer(snapshot, index_snapshot + 1)
   end
 
