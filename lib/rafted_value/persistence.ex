@@ -95,14 +95,15 @@ defmodule RaftedValue.Persistence do
     snapshot_dir      = Path.join(dir, snapshot_basename)
     File.mkdir(snapshot_dir)
 
+    # Write the value
+    vpath = value_path(snapshot_dir)
+    data_module.to_disk(data, vpath)
+
     # Write the consensus 
     cpath                = consensus_path(snapshot_dir)
     consensus_compressed = SnapConsensus.encode(snapshot.consensus)
     File.write!(cpath, consensus_compressed)
     
-    # Write the value
-    vpath = value_path(snapshot_dir)
-    data_module.to_disk(data, vpath)
 
     %{size: consensus_size} = File.stat! cpath
 

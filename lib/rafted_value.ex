@@ -24,6 +24,9 @@ defmodule RaftedValue do
   The 2nd argument is a keyword list of options to specify member-specific configurations.
 
   - `:name`: An atom for local name registration.
+  - `:data_environment`: A value that will be passed to `Data.open/1`, `Data.from_snapshot/2` and `Data.from_disk/2`.
+    Defaults to `nil`.
+    Computation should be consistent across nodes regardless of this value (e.g. use to specify a working directory)
   - `:persistence_dir`: Directory path in which both Raft logs and periodic snapshots are stored.
     If not given, the newly-spawned process will run in in-memory mode; it does not persist its state.
     The specified directory will be created if it does not exist.
@@ -86,9 +89,6 @@ defmodule RaftedValue do
   `data_module` must be an implementation of `RaftedValue.Data` behaviour.
   Available options:
 
-  - `data_environment`: A value that will be passed to `Data.open/1`, `Data.from_snapshot/2` and `Data.from_disk/2`.
-    Defaults to `nil`.
-    Computation should be consistent across nodes regardless of this value (e.g. use to specify a working directory)
   - `leader_hook_module`: An implementation of `RaftedValue.LeaderHook`. Defaults to `RaftedValue.LeaderHook.NoOp`.
   - `communication_module`: A module to define member-to-member async communication (`send_event/2` and `reply/2`).
     Defaults to `RaftedValue.RemoteMessageGateway`.
@@ -198,13 +198,13 @@ defmodule RaftedValue do
     end
   end
 
-  @doc """    
-  Replaces the current configuration.   
-    
-  The new configuration is replicated (as raft log) to all members.   
-  """   
-  defun change_config(leader :: GenServer.server, new_config = %Config{}) :: :ok | {:error, not_leader} do    
-    call(leader, {:change_config, new_config})    
+  @doc """
+  Replaces the current configuration.
+
+  The new configuration is replicated (as raft log) to all members.
+  """
+  defun change_config(leader :: GenServer.server, new_config = %Config{}) :: :ok | {:error, not_leader} do
+    call(leader, {:change_config, new_config})
   end
 
   @type status_result :: %{

@@ -24,8 +24,8 @@ defmodule RaftedValue.Server do
   #   - defined in Raft (client-to-leader messages)
   #     - {:command, arg, cmd_id}
   #     - {:query, arg}
-  #     - {:add_follower, pid}
   #     - {:change_config, new_config}
+  #     - {:add_follower, pid}
   #     - {:remove_follower, pid}
   #     - {:replace_leader, new_leader}
   #   - others (client-to-anymember messages)

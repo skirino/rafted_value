@@ -10,12 +10,11 @@ alias RaftedValue.{Members, TermNumber, LogEntry, Config, CommandResults}
     command_results:      CommandResults,
   ]
   defun encode(consensus :: t) :: binary do
-    :erlang.term_to_binary(consensus)# |> :zlib.gzip()
+    :erlang.term_to_binary(consensus) |> :zlib.gzip()
   end
 
   defun decode(bin :: binary) :: t do
-    #:zlib.gunzip(bin) |> :erlang.binary_to_term()
-    :erlang.binary_to_term(bin)
+    :zlib.gunzip(bin) |> :erlang.binary_to_term()
   end
 end
 defmodule RaftedValue.Snapshot do
