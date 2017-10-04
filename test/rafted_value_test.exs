@@ -44,8 +44,8 @@ defmodule RaftedValueTest do
     end
   end
 
-  defp add_follower(leader, config, name \\ nil, dir \\ nil) do
-    {:ok, follower} = RaftedValue.start_link({:join_existing_consensus_group, [leader], config}, [name: name, persistence_dir: dir])
+  defp add_follower(leader, name \\ nil, dir \\ nil) do
+    {:ok, follower} = RaftedValue.start_link({:join_existing_consensus_group, [leader]}, [name: name, persistence_dir: dir])
     wait_until_member_change_completes(leader)
     follower
   end
@@ -56,7 +56,7 @@ defmodule RaftedValueTest do
     followers =
       Enum.map(1 .. n_follower, fn i ->
         dir = if persist?, do: Path.join(@tmp_dir, "follower#{i}"), else: nil
-        add_follower(leader, config, nil, dir)
+        add_follower(leader, nil, dir)
       end)
     {leader, followers}
   end
@@ -82,9 +82,9 @@ defmodule RaftedValueTest do
   test "should appropriately start/add/remove/stop server" do
     {:ok, leader} = RaftedValue.start_link({:create_new_consensus_group, @config}, [name: :foo])
     assert Process.whereis(:foo) == leader
-    follower1 = add_follower(leader, @config, :bar)
+    follower1 = add_follower(leader, :bar)
     assert Process.whereis(:bar) == follower1
-    {:ok, follower2} = RaftedValue.start_link({:join_existing_consensus_group, [follower1, leader], @config}, [name: :baz])
+    {:ok, follower2} = RaftedValue.start_link({:join_existing_consensus_group, [follower1, leader]}, [name: :baz])
     wait_until_member_change_completes(leader)
     assert Process.whereis(:baz) == follower2
 
@@ -103,7 +103,7 @@ defmodule RaftedValueTest do
 
   test "should not concurrently execute multiple membership changes" do
     {:ok, leader} = RaftedValue.start_link({:create_new_consensus_group, @config})
-    _follower1 = add_follower(leader, @config)
+    _follower1 = add_follower(leader)
 
     ref1 = simulate_send_sync_event(leader, {:add_follower, self()})
     ref2 = simulate_send_sync_event(leader, {:add_follower, self()})
@@ -122,7 +122,7 @@ defmodule RaftedValueTest do
 
   test "should report error when trying to add already joined member" do
     {:ok, leader} = RaftedValue.start_link({:create_new_consensus_group, @config})
-    follower1 = add_follower(leader, @config)
+    follower1 = add_follower(leader)
     assert :gen_statem.call(leader, {:add_follower, follower1}) == {:error, :already_joined}
   end
 
@@ -139,7 +139,7 @@ defmodule RaftedValueTest do
   test "start_link_and_join_consensus_group should return error and the process should die when no leader found" do
     :error_logger.tty(false) # suppress crash report due to error in `init/1`
     try do
-      {:error, _} = RaftedValue.start_link({:join_existing_consensus_group, [:unknown, :member], @config})
+      {:error, _} = RaftedValue.start_link({:join_existing_consensus_group, [:unknown, :member]})
       assert_receive({:EXIT, _pid, _})
     after
       :error_logger.tty(true)
@@ -377,6 +377,21 @@ defmodule RaftedValueTest do
     end)
   end
 
+  test "change_config should replace current config field on commit" do   
+    {leader, followers} = make_cluster(2)   
+    members = [leader | followers]    
+    Enum.each(members, fn member ->   
+      assert RaftedValue.status(member).config == @config  
+    end)    
+    
+    new_conf = Map.update!(@config, :election_timeout, fn t -> t + 1 end)   
+    assert RaftedValue.change_config(leader, new_conf) == :ok   
+    :timer.sleep(@config.heartbeat_timeout * 2)   
+    Enum.each(members, fn member ->   
+      assert RaftedValue.status(member).config == new_conf    
+    end)    
+  end
+
   test "other callbacks just do irrelevant things" do
     {leader, followers} = make_cluster(2)
 
@@ -418,8 +433,8 @@ defmodule RaftedValueTest do
       |> Map.put(:election_timeout_clock_drift_margin, 1)
       |> Map.put(:heartbeat_timeout, 80)
     {:ok, leader} = RaftedValue.start_link({:create_new_consensus_group, config})
-    follower1 = add_follower(leader, config)
-    follower2 = add_follower(leader, config)
+    follower1 = add_follower(leader)
+    follower2 = add_follower(leader)
 
     # Lease time should be calculated from the time AppendEntriesRequest messages are broadcasted from leader to follwers.
     # `command` will take ~80ms for round trip of AppendEntriesRequest and AppendEntriesResponse.
@@ -625,7 +640,7 @@ defmodule RaftedValueTest do
     %{context | current_leader: next_leader}
   end
 
-  def op_add_follower(%{config: config} = context) do
+  def op_add_follower(%{} = context) do
     leader = context.current_leader
     persistence_dir =
       case context.persistence_base_dir do
@@ -634,7 +649,7 @@ defmodule RaftedValueTest do
           random = :crypto.strong_rand_bytes(10) |> Base.encode16()
           Path.join(dir, random)
       end
-    new_follower = add_follower(leader, config, nil, persistence_dir)
+    new_follower = add_follower(leader, nil, persistence_dir)
     assert_receive({:follower_added, ^new_follower}, @t_max_election_timeout)
     %{context | working: [new_follower | context.working]}
   end
@@ -709,7 +724,7 @@ defmodule RaftedValueTest do
 
     initial_members = [leader, follower1, follower2]
     context =
-      %{config: config, working: initial_members, killed: [], isolated: [], current_leader: leader, leaders: %{}, term_numbers: %{}, commit_indices: %{}, leader_commit_index: 0, data: %{}, persistence_base_dir: persistence_base_dir}
+      %{working: initial_members, killed: [], isolated: [], current_leader: leader, leaders: %{}, term_numbers: %{}, commit_indices: %{}, leader_commit_index: 0, data: %{}, persistence_base_dir: persistence_base_dir}
       |> assert_invariants()
     client_pid = spawn_link(fn -> client_process_loop(initial_members, JustAnInt.new(nil)) end)
     {context, client_pid}

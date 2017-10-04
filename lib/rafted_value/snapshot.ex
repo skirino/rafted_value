@@ -1,22 +1,26 @@
 use Croma
 defmodule RaftedValue.SnapConsensus do
+alias RaftedValue.{Members, TermNumber, LogEntry, Config, CommandResults}
+
   use Croma.Struct, fields: [
+    config:               Config,
     members:              Members,
     term:                 TermNumber,
     last_committed_entry: LogEntry,
     command_results:      CommandResults,
   ]
-  defun encode(snapshot :: Snapshot.t) :: binary do
-    :erlang.term_to_binary(snapshot.consensus)# |> :zlib.gzip()
+  defun encode(consensus :: t) :: binary do
+    :erlang.term_to_binary(consensus)# |> :zlib.gzip()
   end
 
-  defun decode(bin :: binary) :: Snapshot.t do
+  defun decode(bin :: binary) :: t do
     #:zlib.gunzip(bin) |> :erlang.binary_to_term()
     :erlang.binary_to_term(bin)
   end
 end
 defmodule RaftedValue.Snapshot do
-  alias RaftedValue.{Members, TermNumber, LogEntry, Config, CommandResults, Persistence, SnapConsensus, Transfer}
+  alias RaftedValue.{LogEntry, Config, Persistence, SnapConsensus, Transfer}
+  
   alias RaftedValue.Persistence.SnapshotMetadata
   alias RaftedValue.RPC.{InstallSnapshot, InstallSnapshotCompressed}
 
@@ -27,10 +31,12 @@ defmodule RaftedValue.Snapshot do
 
   @transfer_size 1024 * 1024
 
-  defun from_install_snapshot(config :: Config.t, is :: InstallSnapshot.t) :: t do
+  defun from_install_snapshot(data_environment :: any, is :: InstallSnapshot.t) :: t do
+    %Config{data_module: data_module} = is.config
     %__MODULE__{
-      data: config.data_module.from_snapshot(is.data, config.data_environment),
+      data: data_module.from_snapshot(is.data, data_environment),
       consensus: %SnapConsensus{
+        config: is.config,
         members: is.members,
         term: is.term,
         last_committed_entry: is.last_committed_entry,
@@ -39,31 +45,35 @@ defmodule RaftedValue.Snapshot do
     }
   end
 
-  defun from_compressed_snapshot(config :: Config.t, sc :: InstallSnapshotCompressed.t) :: t do
+  defun from_compressed_snapshot(data_environment :: any, sc :: InstallSnapshotCompressed.t) :: t do
     %InstallSnapshotCompressed{consensus_bin: consensus_bin, value_io_pid: value_io_pid} = sc
 
     consensus            = consensus_bin |> SnapConsensus.decode()
-    term                 = consensus.term
+    config               = consensus.config
     {temp_path, _}       = System.cmd("mktemp", [])
     value_path           = String.trim(temp_path, "\n")
     value_destination    = File.stream!(value_path, [:write])
-    %Config{data_environment: data_environment, data_module: data_module} = config
+    %Config{data_module: data_module} = config
     
     #  Read the remote file 1mB at a time
     Transfer.stream(value_io_pid, @transfer_size)
     |> Enum.into(value_destination)
     
+    data = data_module.from_disk(value_path, data_environment)
+
+    File.rm!(value_path)
+
     %__MODULE__{
       consensus: consensus,
-      data: data_module.from_disk(value_path, data_environment)
+      data: data
     }
   end
 
-  defun read_lastest_snapshot_and_logs_if_available(config :: Config.t, dir :: Path.t) :: nil | {t, SnapshotMetadata.t, Enum.t(LogEntry.t)} do
+  defun read_lastest_snapshot_and_logs_if_available(data_environment :: any, dir :: Path.t) :: nil | {t, SnapshotMetadata.t, Enum.t(LogEntry.t)} do
     case find_snapshot_and_log_files(dir) do
       nil                              -> nil
       {snapshot_dir, meta, log_paths} ->
-        snapshot = Persistence.read_lastest_snapshot_from_dir(config, snapshot_dir)
+        snapshot = Persistence.read_lastest_snapshot_from_dir(data_environment, snapshot_dir)
         {_, last_committed_index, _, _} = snapshot.consensus.last_committed_entry
         log_stream =
           Stream.flat_map(log_paths, &LogEntry.read_as_stream/1)

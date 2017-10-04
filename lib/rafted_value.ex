@@ -57,8 +57,8 @@ defmodule RaftedValue do
   """
   defun start_link(info :: consensus_group_info, options :: [option] \\ []) :: GenServer.on_start do
     case info do
-      {:create_new_consensus_group   , %Config{}               }                             -> :ok
-      {:join_existing_consensus_group, known_members, %Config{}} when is_list(known_members) -> :ok
+      {:create_new_consensus_group   , %Config{}               }                  -> :ok
+      {:join_existing_consensus_group, known_members} when is_list(known_members) -> :ok
       # raise otherwise
     end
     start_link_impl(info, normalize_options(options))
@@ -110,7 +110,6 @@ defmodule RaftedValue do
     election_timeout = Keyword.get(opts, :election_timeout, 1000)
     %Config{
       data_module:                         data_module,
-      data_environment:                    Keyword.get(opts, :data_environment                   , nil),
       leader_hook_module:                  Keyword.get(opts, :leader_hook_module                 , RaftedValue.LeaderHook.NoOp),
       communication_module:                Keyword.get(opts, :communication_module               , RaftedValue.RemoteMessageGateway),
       heartbeat_timeout:                   Keyword.get(opts, :heartbeat_timeout                  , 200),
@@ -197,6 +196,15 @@ defmodule RaftedValue do
       :exit, {a, _} when a in [:noproc, :normal] -> {:error, :noproc}
       :exit, {:timeout, _}                       -> {:error, :timeout}
     end
+  end
+
+  @doc """    
+  Replaces the current configuration.   
+    
+  The new configuration is replicated (as raft log) to all members.   
+  """   
+  defun change_config(leader :: GenServer.server, new_config = %Config{}) :: :ok | {:error, not_leader} do    
+    call(leader, {:change_config, new_config})    
   end
 
   @type status_result :: %{

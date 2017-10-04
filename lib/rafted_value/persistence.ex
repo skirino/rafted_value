@@ -21,11 +21,11 @@ defmodule RaftedValue.Persistence do
     snapshot_writer:          Croma.TypeGen.nilable(Croma.Pid),
   ]
 
-  defun new_with_initial_snapshotting(config :: Config.t, dir :: Path.t, factor :: number, snapshot :: Snapshot.t) :: t do
+  defun new_with_initial_snapshotting(dir :: Path.t, factor :: number, snapshot :: Snapshot.t) :: t do
     File.mkdir_p!(dir)
     {_, index_first, _, _} = entry_elected = snapshot.consensus.last_committed_entry
     %__MODULE__{dir: dir, log_size_written: 0, log_compaction_rate: factor} # `log_fd` will be filled soon
-    |> switch_log_file_and_spawn_snapshot_writer(config, snapshot, index_first)
+    |> switch_log_file_and_spawn_snapshot_writer(snapshot, index_first)
     |> write_log_entries([entry_elected])
   end
 
@@ -34,11 +34,11 @@ defmodule RaftedValue.Persistence do
     |> write_log_entries([entry_restore])
   end
 
-  defun new_with_snapshot_sent_from_leader(config :: Config.t, dir :: Path.t, factor :: number, snapshot :: Snapshot.t) :: t do
+  defun new_with_snapshot_sent_from_leader(dir :: Path.t, factor :: number, snapshot :: Snapshot.t) :: t do
     File.mkdir_p!(dir)
     {_, index_snapshot, _, _} = snapshot.consensus.last_committed_entry
     %__MODULE__{dir: dir, log_size_written: 0, log_compaction_rate: factor} # `log_fd` will be filled soon
-    |> switch_log_file_and_spawn_snapshot_writer(config, snapshot, index_snapshot + 1)
+    |> switch_log_file_and_spawn_snapshot_writer(snapshot, index_snapshot + 1)
   end
 
   defun unset_snapshot_metadata(p :: t) :: t do
@@ -66,7 +66,6 @@ defmodule RaftedValue.Persistence do
   end
 
   defun switch_log_file_and_spawn_snapshot_writer(%__MODULE__{dir: dir, log_fd: log_fd1} = persistence,
-                                                  config     :: Config.t,
                                                   snapshot   :: Snapshot.t,
                                                   index_next :: LogIndex.t) :: t do
     if log_fd1 do
@@ -75,7 +74,7 @@ defmodule RaftedValue.Persistence do
     server_pid  = self()
     log_fd2     = open_log_file(dir, index_next)
     {pid, _ref} = spawn_monitor(fn ->
-      write_snapshot(config, snapshot, dir, server_pid)
+      write_snapshot(snapshot, dir, server_pid)
     end)
     %__MODULE__{persistence | log_fd: log_fd2, log_size_written: 0, snapshot_writer: pid}
   end
@@ -85,9 +84,9 @@ defmodule RaftedValue.Persistence do
     File.open!(log_path, [:write, :sync, :raw])
   end
 
-  defp write_snapshot(%Config{data_module: data_module},
-                      %Snapshot{data:                 data,
+  defp write_snapshot(%Snapshot{data:                 data,
                                 consensus: %SnapConsensus{
+                                  config:  %Config{data_module: data_module},
                                   last_committed_entry: {_, last_committed_index, _, _},
                                   term:                 term}} = snapshot,
                       dir,
@@ -98,7 +97,7 @@ defmodule RaftedValue.Persistence do
 
     # Write the consensus 
     cpath                = consensus_path(snapshot_dir)
-    consensus_compressed = SnapConsensus.encode(snapshot)
+    consensus_compressed = SnapConsensus.encode(snapshot.consensus)
     File.write!(cpath, consensus_compressed)
     
     # Write the value
@@ -159,9 +158,9 @@ defmodule RaftedValue.Persistence do
     String.to_integer(index_first)
   end
 
-  defun read_lastest_snapshot_from_dir(config :: Config.t, dir :: Path.t) :: SnapShot.t do
+  defun read_lastest_snapshot_from_dir(data_environment :: any, dir :: Path.t) :: SnapShot.t do
     consensus = consensus_path(dir) |> File.read!() |> SnapConsensus.decode()
-    %Config{data_module: data_module, data_environment: data_environment} = config
+    %Config{data_module: data_module} = consensus.config
     value = value_path(dir) |> data_module.from_disk(data_environment)
     %Snapshot{consensus: consensus, data: value}
   end

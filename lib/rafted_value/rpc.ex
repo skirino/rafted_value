@@ -44,6 +44,7 @@ defmodule RaftedValue.RPC do
 
   defmodule InstallSnapshot do
     use Croma.Struct, fields: [
+      config:               Config,
       members:              Members,
       term:                 TermNumber,
       last_committed_entry: LogEntry,
