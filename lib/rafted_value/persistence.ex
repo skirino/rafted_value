@@ -25,7 +25,8 @@ defmodule RaftedValue.Persistence do
     @callback snapshot_created(path, consensus_term, index, size) :: neglected
   end
   defmodule PersistenceHookNoOp do
-    @behaviour 
+    @behaviour RaftedValue.Persistence.PersistenceHook
+    
     def snapshot_created(_path, _term, _index, _size), do: nil
   end
 

@@ -8,7 +8,7 @@ defmodule RaftedValue do
   alias RaftedValue.{TermNumber, Config, Server, Data, LogIndex, Persistence}
 
   @type consensus_group_info :: {:create_new_consensus_group, Config.t} | {:join_existing_consensus_group, [GenServer.server]}
-  @type option               :: {:name, atom} | {:persistence_dir, Path.t} | {:log_file_expansion_factor, number}
+  @type option               :: {:name, atom} | {:data_environment, any} | {:persistence_hook, atom} | {:persistence_dir, Path.t} | {:log_file_expansion_factor, number}
 
   @default_log_file_expansion_factor 10
 
@@ -32,6 +32,8 @@ defmodule RaftedValue do
     The specified directory will be created if it does not exist.
     Note that it's caller's responsibility to ensure that the specified directory is not used by other `RaftedValue` process.
     See below for details of restoring state from snapshot and logs.
+  - `:persistence_hook`: Must be an implementation of `RaftedValue.Persistence.PersistenceHook` behaviour.
+    Provides callbacks to signal when snapshots are completed.
   - `:log_file_expansion_factor`: A number that adjusts when to make a snapshot file.
     This does not take effect if `:persistence_dir` is not given.
     `RaftedValue` keeps track of the file sizes of "currently growing log file" and "previous snapshot file".
