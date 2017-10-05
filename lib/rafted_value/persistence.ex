@@ -1,7 +1,7 @@
 use Croma
 
 defmodule RaftedValue.Persistence do
-  alias RaftedValue.{TermNumber, LogIndex, LogEntry, Snapshot}
+  alias RaftedValue.{Config, TermNumber, LogIndex, LogEntry, Snapshot, SnapConsensus}
 
   defmodule SnapshotMetadata do
     use Croma.Struct, fields: [
@@ -12,32 +12,51 @@ defmodule RaftedValue.Persistence do
     ]
   end
 
+  defmodule PersistenceHook do
+    alias RaftedValue.Snapshot
+    @type neglected      :: any
+    @type path           :: Path.t
+    @type consensus_term :: integer
+    @type index          :: integer
+    @type size           :: integer
+    @doc """
+    Hook to be called when a snapshot is finished.
+    """
+    @callback snapshot_created(path, consensus_term, index, size) :: neglected
+  end
+  defmodule PersistenceHookNoOp do
+    @behaviour RaftedValue.Persistence.PersistenceHook
+    
+    def snapshot_created(_path, _term, _index, _size), do: nil
+  end
+
   use Croma.Struct, fields: [
     dir:                      Croma.String,
-    log_fd:                   Croma.TypeGen.nilable(Croma.Tuple), # This field is `nil` only during initialization (within `new_with_initial_snapshotting/2`)
+    hook:                     Croma.Atom,
+    log_fd:                   Croma.TypeGen.nilable(Croma.Tuple), # This field is `nil` only during initialization (within `new_with_initial_snapshotting/4`)
     log_size_written:         Croma.NonNegInteger,
-    log_expansion_factor:     Croma.Number,
+    log_compaction_factor:      Croma.Number,
     latest_snapshot_metadata: Croma.TypeGen.nilable(SnapshotMetadata), # This field is `nil` only between startup and first snapshot
     snapshot_writer:          Croma.TypeGen.nilable(Croma.Pid),
   ]
 
-  defun new_with_initial_snapshotting(dir :: Path.t, factor :: number, snapshot :: Snapshot.t) :: t do
+  defun new_with_initial_snapshotting(dir :: Path.t, factor :: number, persistence_hook :: atom, snapshot :: Snapshot.t) :: t do
     File.mkdir_p!(dir)
-    {_, index_first, _, _} = entry_elected = snapshot.last_committed_entry
-    %__MODULE__{dir: dir, log_size_written: 0, log_expansion_factor: factor} # `log_fd` will be filled soon
+    {_, index_first, _, _} = entry_elected = snapshot.consensus.last_committed_entry
+    %__MODULE__{dir: dir, log_size_written: 0, log_compaction_factor: factor, hook: persistence_hook} # `log_fd` will be filled soon
     |> switch_log_file_and_spawn_snapshot_writer(snapshot, index_first)
     |> write_log_entries([entry_elected])
   end
 
-  defun new_with_disk_snapshot(dir :: Path.t, factor :: number, meta :: SnapshotMetadata.t, {_, index_first, _, _} = entry_restore :: LogEntry.t) :: t do
-    %__MODULE__{dir: dir, log_fd: open_log_file(dir, index_first), log_size_written: 0, log_expansion_factor: factor, latest_snapshot_metadata: meta}
+  defun new_with_disk_snapshot(dir :: Path.t, factor :: number, persistence_hook :: atom, meta :: SnapshotMetadata.t, {_, index_first, _, _} = entry_restore :: LogEntry.t) :: t do
+    %__MODULE__{dir: dir, log_fd: open_log_file(dir, index_first), log_size_written: 0, log_compaction_factor: factor, hook: persistence_hook, latest_snapshot_metadata: meta}
     |> write_log_entries([entry_restore])
   end
 
-  defun new_with_snapshot_sent_from_leader(dir :: Path.t, factor :: number, snapshot :: Snapshot.t) :: t do
+  defun new_with_snapshot_sent_from_leader(dir :: Path.t, factor :: number, persistence_hook :: atom, snapshot :: Snapshot.t) :: t do
     File.mkdir_p!(dir)
-    {_, index_snapshot, _, _} = snapshot.last_committed_entry
-    %__MODULE__{dir: dir, log_size_written: 0, log_expansion_factor: factor} # `log_fd` will be filled soon
+    {_, index_snapshot, _, _} = snapshot.consensus.last_committed_entry
+    %__MODULE__{dir: dir, log_size_written: 0, log_compaction_factor: factor, hook: persistence_hook} # `log_fd` will be filled soon
     |> switch_log_file_and_spawn_snapshot_writer(snapshot, index_snapshot + 1)
   end
 
@@ -53,7 +72,7 @@ defmodule RaftedValue.Persistence do
 
   defun log_compaction_runnable?(%__MODULE__{latest_snapshot_metadata: meta,
                                              log_size_written:         size_l,
-                                             log_expansion_factor:     factor,
+                                             log_compaction_factor:      factor,
                                              snapshot_writer:          writer}) :: boolean do
     if is_pid(writer) do
       false
@@ -84,24 +103,39 @@ defmodule RaftedValue.Persistence do
     File.open!(log_path, [:write, :sync, :raw])
   end
 
-  defp write_snapshot(%Snapshot{term:                 term,
-                                last_committed_entry: {_, last_committed_index, _, _}} = snapshot,
+  defp write_snapshot(%Snapshot{data:                 data,
+                                consensus: %SnapConsensus{
+                                  config:  %Config{data_module: data_module},
+                                  last_committed_entry: {_, last_committed_index, _, _},
+                                  term:                 term}} = snapshot,
                       dir,
                       server_pid) do
     snapshot_basename = "snapshot_#{term}_#{last_committed_index}"
-    snapshot_path     = Path.join(dir, snapshot_basename)
-    compressed        = Snapshot.encode(snapshot)
-    File.write!(snapshot_path, compressed)
+    snapshot_dir      = Path.join(dir, snapshot_basename)
+    File.mkdir(snapshot_dir)
+
+    # Write the value
+    vpath = value_path(snapshot_dir)
+    data_module.to_disk(data, vpath)
+
+    # Write the consensus 
+    cpath                = consensus_path(snapshot_dir)
+    consensus_compressed = SnapConsensus.encode(snapshot.consensus)
+    File.write!(cpath, consensus_compressed)
+    
+
+    %{size: consensus_size} = File.stat! cpath
 
     # notify the gen_statem process (we have to wait for reply in order to ensure that older snapshots won't be used anymore)
-    message = {:snapshot_created, snapshot_path, term, last_committed_index, byte_size(compressed)}
+    message = {:snapshot_created, snapshot_dir, term, last_committed_index, consensus_size}
     :ok = :gen_statem.call(server_pid, message, :infinity)
 
     # cleanup obsolete snapshots and logs
     Path.wildcard(Path.join(dir, "snapshot_*"))
     |> Enum.filter(fn path -> Path.basename(path) != snapshot_basename end)
     |> Enum.drop(1)
-    |> Enum.each(&File.rm!/1)
+    |> Enum.each(&File.rm_rf!/1)
+
     find_log_files_with_committed_entries_only(dir, last_committed_index)
     |> Enum.each(&File.rm!/1)
   end
@@ -142,5 +176,19 @@ defmodule RaftedValue.Persistence do
   defunp extract_first_log_index_from_path(path :: Path.t) :: LogIndex.t do
     ["log", index_first] = Path.basename(path) |> String.split("_")
     String.to_integer(index_first)
+  end
+
+  defun read_lastest_snapshot_from_dir(data_environment :: any, dir :: Path.t) :: SnapShot.t do
+    consensus = consensus_path(dir) |> File.read!() |> SnapConsensus.decode()
+    %Config{data_module: data_module} = consensus.config
+    value = value_path(dir) |> data_module.from_disk(data_environment)
+    %Snapshot{consensus: consensus, data: value}
+  end
+
+  defun value_path(dir :: Path.t) :: Path.t do
+    Path.join(dir, "value.snap")
+  end
+  defun consensus_path(dir :: Path.t) :: Path.t do
+    Path.join(dir, "consensus.snap")
   end
 end

@@ -55,7 +55,8 @@ defmodule RaftedValue.RPC do
 
   defmodule InstallSnapshotCompressed do
     use Croma.Struct, fields: [
-      bin: Croma.Binary,
+      consensus_bin: Croma.Binary,
+      value_io_pid: Croma.Binary,
     ]
   end
 
