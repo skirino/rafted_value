@@ -404,7 +404,8 @@ defmodule RaftedValueTest do
     assert l == leader
     assert Process.alive?(leader)
 
-    assert RaftedValue.Server.code_change('old_vsn', :leader, %RaftedValue.Server.State{}, :extra) == {:ok, :leader, %RaftedValue.Server.State{}}
+    {:leader, state} = :sys.get_state(l)
+    assert RaftedValue.Server.code_change('old_vsn', :leader, state, :extra) == {:ok, :leader, state}
   end
 
   defmodule CommunicationWithDelay do
