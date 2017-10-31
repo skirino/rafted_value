@@ -42,8 +42,8 @@ $ iex --sname 2 -S mix
 iex(2@skirino-Manjaro)1>
 
 $ iex --sname 3 -S mix
-iex(3@skirino-Manjaro)1> Node.connect :"1@skirino-Manjaro"
-iex(3@skirino-Manjaro)1> Node.connect :"2@skirino-Manjaro"
+iex(3@skirino-Manjaro)1> Node.connect(:"1@skirino-Manjaro")
+iex(3@skirino-Manjaro)1> Node.connect(:"2@skirino-Manjaro")
 ```
 
 Load the following module in all nodes.
@@ -51,7 +51,7 @@ Load the following module in all nodes.
 ```ex
 defmodule QueueWithLength do
   @behaviour RaftedValue.Data
-  def new, do: {:queue.new(), 0}
+  def new(), do: {:queue.new(), 0}
   def command({q, l}, {:enqueue, v}) do
     {l, {:queue.in(v, q), l + 1}}
   end
