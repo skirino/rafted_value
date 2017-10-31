@@ -115,11 +115,16 @@ defmodule RaftedValue.Leadership do
   end
 
   defunp quorum_last_reached_at_impl(times :: %{pid => Monotonic.t}, n_members :: pos_integer) :: nil | Monotonic.t do
-    n_half_followers = div(n_members - 1, 2)
-    Map.values(times)
-    |> Enum.sort()
-    |> Enum.drop(n_half_followers)
-    |> List.first() # can return `nil` if `follwer_responded_times` doesn't contain enough items (i.e. right after a leader is elected)
+    # To reach quorum we need replies from `n_half_followers` followers.
+    n_half_followers = div(n_members, 2) # Note that, based on the caller's logic, `n_members >= 2` and thus `n_half_followers >= 1`
+    # Find a timestamp after which `n_half_followers` replies has come in to this leader.
+    n_responded = map_size(times)
+    if n_responded >= n_half_followers do
+      Map.values(times) |> Enum.sort() |> Enum.drop(n_responded - n_half_followers) |> hd()
+    else
+      # `times` doesn't contain enough items (i.e. right after a leader is elected)
+      nil
+    end
   end
 
   defunp max_election_timeout(%Config{election_timeout: t}) :: pos_integer do

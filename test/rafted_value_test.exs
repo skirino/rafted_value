@@ -346,7 +346,7 @@ defmodule RaftedValueTest do
     assert get_term.(follower2) == leader_term
   end
 
-  test "force_remove_member should recover a failed consensus group" do
+  test "force_remove_member/2 should recover a failed consensus group" do
     [3, 5, 7] |> Enum.each(fn n_members ->
       {leader, followers} = make_cluster(n_members - 1)
       remaining_members = Enum.take_random([leader | followers], div(n_members, 2))
@@ -358,13 +358,35 @@ defmodule RaftedValueTest do
         RaftedValue.status(member).state_name == :leader
       end)
 
-      for m1 <- remaining_members, m2 <- failed_members do
-        assert RaftedValue.force_remove_member(m1, m2) == :ok
+      for f <- failed_members, r <- remaining_members do
+        assert RaftedValue.force_remove_member(r, f) == :ok
       end
       :timer.sleep(@t_max_election_timeout)
       assert Enum.any?(remaining_members, fn member ->
         RaftedValue.status(member).state_name == :leader
       end)
+    end)
+  end
+
+  test "after repairing by force_remove_member/2, leader should continue working without stepping down by itself" do
+    # Test case for the following bug:
+    # Calculation of `quorum_last_reached_at` was incorrect when a dead pid is included in the members list
+    {l0, [f1, f2, f3]} = make_cluster(3)
+    :gen_statem.stop(f2)
+    :gen_statem.stop(f3)
+    :timer.sleep(@t_max_election_timeout * 2)
+    :ok = RaftedValue.force_remove_member(l0, f3)
+    :ok = RaftedValue.force_remove_member(f1, f3)
+    :timer.sleep(@t_max_election_timeout * 2)
+
+    # Now 2/3 are alive, so there must be an established leader.
+    new_leader = RaftedValue.status(l0).leader
+    assert is_pid(new_leader)
+    assert RaftedValue.status(f1).leader == new_leader
+    Enum.each(1..30, fn _ ->
+      :timer.sleep(200)
+      assert RaftedValue.status(l0).leader == new_leader
+      assert RaftedValue.status(f1).leader == new_leader
     end)
   end
 
