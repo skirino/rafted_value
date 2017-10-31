@@ -119,4 +119,5 @@ iex(1@skirino-Manjaro)11> RaftedValue.command(:foo, :dequeue)
 - [Raft official website](https://raft.github.io/)
 - [The original paper](http://ramcloud.stanford.edu/raft.pdf)
 - [The thesis](https://ramcloud.stanford.edu/~ongaro/thesis.pdf)
-- [raft_fleet](https://github.com/skirino/raft_fleet) : Elixir library to run multiple RaftedValue consensus groups in cluster of ErlangVMs
+- [raft_fleet](https://github.com/skirino/raft_fleet) : Elixir library to run multiple `RaftedValue` consensus groups in a cluster of ErlangVMs
+- [My slides to introduce rafted_value and raft_fleet](https://skirino.github.io/slides/raft_fleet.html#/)
