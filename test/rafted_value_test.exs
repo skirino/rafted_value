@@ -368,15 +368,6 @@ defmodule RaftedValueTest do
     end)
   end
 
-  test "force_remove_member should return :leader_exists when using it against a healthy consensus group" do
-    {leader, followers} = make_cluster(2)
-    members1 = [leader | followers]
-    members2 = followers ++ [leader]
-    Enum.zip(members1, members2) |> Enum.each(fn {member1, member2} ->
-      assert RaftedValue.force_remove_member(member1, member2) == {:error, :leader_exists}
-    end)
-  end
-
   test "change_config should replace current config field on commit" do
     {leader, followers} = make_cluster(2)
     members = [leader | followers]

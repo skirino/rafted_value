@@ -141,12 +141,13 @@ defmodule RaftedValue do
   The sole purpose of this function is to recover a consensus group from majority failure.
   This operation is unsafe in the sense that it may not preserve invariants of the Raft algorithm
   (for example some committed logs may be lost); use this function as a last resort.
-  When the receiver process thinks that there exists a valid leader, it rejects with `:leader_exists`.
 
   Membership change introduced by this function is not propagated to other members.
-  It is caller's responsibility to notify all existing members of the membership change.
+  It is caller's responsibility
+  - to stop `member_to_remove` if it is still alive, and
+  - to notify all existing members of the membership change.
   """
-  defun force_remove_member(member :: GenServer.server, member_to_remove :: pid) :: :ok | {:error, :leader_exists} do
+  defun force_remove_member(member :: GenServer.server, member_to_remove :: pid) :: :ok do
     (member, member_to_remove) when is_pid(member_to_remove) and member != member_to_remove ->
       call(member, {:force_remove_member, member_to_remove})
   end

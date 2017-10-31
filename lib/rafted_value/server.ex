@@ -654,15 +654,11 @@ defmodule RaftedValue.Server do
     keep_fsm_state_and_reply(new_state, from, :ok)
   end
   defp handle_call_common({:force_remove_member, member_to_remove}, from, _state_name, %State{members: members} = state) do
-    if members.leader do
-      keep_fsm_state_and_reply(state, from, {:error, :leader_exists})
-    else
-      # There are cases where removing a member can trigger state transition (e.g. candidate => leader).
-      # To make things simpler, we defer those state transitions to next timer event (e.g. next election timeout).
-      new_members = Members.force_remove_member(members, member_to_remove)
-      new_state   = %State{state | members: new_members}
-      keep_fsm_state_and_reply(new_state, from, :ok)
-    end
+    # There are cases where removing a member can trigger state transition (e.g. candidate => leader).
+    # To make things simpler, we defer those state transitions to next timer event (e.g. next election timeout).
+    new_members = Members.force_remove_member(members, member_to_remove)
+    new_state   = %State{state | members: new_members}
+    keep_fsm_state_and_reply(new_state, from, :ok)
   end
   defp handle_call_common(:status, from, state_name, %State{members: members, current_term: current_term, leadership: leadership, config: config} = state) do
     unresponsive_followers =
