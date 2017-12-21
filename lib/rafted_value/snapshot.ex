@@ -44,11 +44,11 @@ defmodule RaftedValue.Snapshot do
     end
   end
 
-  defun encode(snapshot :: Snapshot.t) :: binary do
+  defun encode(snapshot :: t) :: binary do
     :erlang.term_to_binary(snapshot) |> :zlib.gzip()
   end
 
-  defun decode(bin :: binary) :: Snapshot.t do
+  defun decode(bin :: binary) :: t do
     :zlib.gunzip(bin) |> :erlang.binary_to_term()
   end
 end

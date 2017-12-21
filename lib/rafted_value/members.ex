@@ -3,7 +3,7 @@ alias Croma.TypeGen, as: TG
 alias Croma.Result, as: R
 
 defmodule RaftedValue.Members do
-  alias RaftedValue.{PidSet, LogEntry}
+  alias RaftedValue.{PidSet, LogEntry, LogIndex}
 
   use Croma.Struct, fields: [
     leader:                        TG.nilable(Croma.Pid),

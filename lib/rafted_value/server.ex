@@ -59,7 +59,7 @@ defmodule RaftedValue.Server do
   #   (note that this is basically equivalent to implicitly establish client session for each request)
   #
 
-  alias RaftedValue.{TermNumber, PidSet, Members, Leadership, Election, Logs, CommandResults, Config, Persistence, Snapshot, Monotonic}
+  alias RaftedValue.{TermNumber, PidSet, Members, Leadership, Election, Logs, LogEntry, CommandResults, Config, Persistence, Snapshot, Monotonic}
   alias RaftedValue.RPC.{
     AppendEntriesRequest,
     AppendEntriesResponse,

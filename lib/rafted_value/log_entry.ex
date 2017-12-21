@@ -1,7 +1,7 @@
 use Croma
 
 defmodule RaftedValue.LogEntry do
-  alias RaftedValue.{TermNumber, LogIndex, Config}
+  alias RaftedValue.{TermNumber, LogIndex, Config, Data}
   @type t :: {TermNumber.t, LogIndex.t, :command           , {GenServer.from, Data.command_arg, reference}}
            | {TermNumber.t, LogIndex.t, :query             , {GenServer.from, Data.query_arg}}
            | {TermNumber.t, LogIndex.t, :change_config     , Config.t}
