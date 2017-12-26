@@ -29,6 +29,7 @@ defmodule RaftedValue.Server do
   #     - {:remove_follower, pid}
   #     - {:replace_leader, new_leader}
   #   - others (client-to-anymember messages)
+  #     - {:query_non_leader, arg}
   #     - {:snapshot_created, path, term, index, size}
   #     - {:force_remove_member, pid}
   #     - :status
@@ -647,6 +648,10 @@ defmodule RaftedValue.Server do
     keep_fsm_state(state)
   end
 
+  defp handle_call_common({:query_non_leader, arg}, from, _state_name, state) do
+    run_query_without_leader_hook(state, from, arg)
+    keep_fsm_state(state)
+  end
   defp handle_call_common({:snapshot_created, path, term, index, size}, from, _state_name, %State{persistence: persistence} = state) do
     snapshot_meta   = %Persistence.SnapshotMetadata{path: path, term: term, last_committed_index: index, size: size}
     new_persistence = %Persistence{persistence | latest_snapshot_metadata: snapshot_meta}
@@ -800,6 +805,11 @@ defmodule RaftedValue.Server do
     ret = mod.query(data, arg)
     reply(state, client, {:ok, ret})
     hook.on_query_answered(data, arg, ret)
+  end
+
+  defp run_query_without_leader_hook(%State{data: data, config: %Config{data_module: mod}} = state, client, arg) do
+    ret = mod.query(data, arg)
+    reply(state, client, {:ok, ret})
   end
 
   #

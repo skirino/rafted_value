@@ -180,10 +180,24 @@ defmodule RaftedValue do
   (e.g. by dropping delayed reply by `handle_info(_msg, state)`).
   """
   defun query(leader    :: GenServer.server,
-              query_arg :: RaftedValue.Data.query_arg,
+              query_arg :: Data.query_arg,
               timeout   :: timeout \\ 5000) :: {:ok, Data.query_ret} | {:error, :noproc | :timeout | not_leader} do
     catch_exit(fn ->
       call(leader, {:query, query_arg}, timeout)
+    end)
+  end
+
+  @doc """
+  Executes a read-only query on the stored value of the specified member.
+
+  Unlike `query/3`, this variant allows non-leader members to reply to the query.
+  Return value of this function can be stale; it may not reflect recent updates.
+  """
+  defun query_non_leader(member    :: GenServer.server,
+                         query_arg :: Data.query_arg,
+                         timeout   :: timeout \\ 5000) :: {:ok, Data.query_ret} | {:error, :noproc | :timeout} do
+    catch_exit(fn ->
+      call(member, {:query_non_leader, query_arg}, timeout)
     end)
   end
 

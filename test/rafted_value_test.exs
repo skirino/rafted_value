@@ -249,6 +249,21 @@ defmodule RaftedValueTest do
     assert RaftedValue.query(follower2, :get) == {:error, {:not_leader, leader}}
   end
 
+  test "all members should answer query_non_leader" do
+    {leader, [follower1, follower2]} = make_cluster(2)
+
+    assert RaftedValue.query_non_leader(leader   , :get) == {:ok, 0}
+    assert RaftedValue.query_non_leader(follower1, :get) == {:ok, 0}
+    assert RaftedValue.query_non_leader(follower2, :get) == {:ok, 0}
+
+    # Even during majority failure, surviving member should reply to query_non_leader
+    assert :gen_statem.stop(leader   ) == :ok
+    assert :gen_statem.stop(follower2) == :ok
+    assert RaftedValue.query_non_leader(follower1, :get) == {:ok, 0}
+    :timer.sleep(@conf.election_timeout)
+    assert RaftedValue.query_non_leader(follower1, :get) == {:ok, 0}
+  end
+
   test "should not execute the same client requests with identical reference multiple times" do
     {leader, _} = make_cluster(2)
 
