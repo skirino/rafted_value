@@ -18,8 +18,8 @@ defmodule RaftedValue do
   The 1st argument specifies the consensus group to belong to:
 
   - `{:create_new_consensus_group, config}`: Creates a new consensus group using the given `RaftedValue.Config.t`.
-    The group's only member is the newly-created process and it immediately becomes a leader.
-  - `{:join_existing_consensus_group, [member]}`: Joins an already running consensus group as a follower.
+    The group's sole member is the newly-spawned process and it immediately becomes leader.
+  - `{:join_existing_consensus_group, members}`: Joins an already running consensus group as a follower.
 
   The 2nd argument is a keyword list of options to specify member-specific configurations.
 
