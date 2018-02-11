@@ -19,6 +19,7 @@
 
 ## Notes on backward compatibility
 
+- Users of `<= 0.7.2` should upgrade to `0.7.3` before upgrading to `0.8.x`, due to change in interface of `:communication_module`.
 - In `0.4.0` and `0.5.0` we migrate from `:gen_fsm` (deprecated in Erlang/OTP 20) to `:gen_statem`.
   This introduces a change in message format of member-to-member and client-to-leader communications.
   Users of `0.3.x` must first upgrade to `0.4.0`, which understands both old and new message formats,

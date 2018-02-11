@@ -11,6 +11,10 @@ defmodule RaftedValue.RemoteMessageGateway do
   The discrepancy in the name of `send_event` comes from a historical reason (`:gen_fsm` had been used).
   """
 
+  def cast(fsm_ref, event) do
+    do_send(fsm_ref, {:"$gen_cast", event})
+  end
+
   def send_event(fsm_ref, event) do
     do_send(fsm_ref, {:"$gen_cast", event})
   end
