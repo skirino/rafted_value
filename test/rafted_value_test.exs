@@ -338,8 +338,10 @@ defmodule RaftedValueTest do
 
   test "should reject vote request from disruptive ex-member as long as leader is working fine" do
     defmodule DropRemoveFollowerCompleted do
-      def send_event(_server, :remove_follower_completed), do: :ok
-      def send_event(server, event), do: :gen_statem.cast(server, event)
+      @behaviour RaftedValue.Communication
+
+      def cast(_server, :remove_follower_completed), do: :ok
+      def cast(server, event), do: :gen_statem.cast(server, event)
       def reply(from, reply), do: :gen_statem.reply(from, reply)
     end
 
@@ -437,7 +439,9 @@ defmodule RaftedValueTest do
   end
 
   defmodule CommunicationWithDelay do
-    def send_event(server, event) do
+    @behaviour RaftedValue.Communication
+
+    def cast(server, event) do
       case event do
         %s{} when s in [RaftedValue.RPC.AppendEntriesRequest, RaftedValue.RPC.AppendEntriesResponse] ->
           spawn(fn ->
@@ -803,6 +807,8 @@ defmodule RaftedValueTest do
   end
 
   defmodule CommunicationWithNetsplit do
+    @behaviour RaftedValue.Communication
+
     def start() do
       Agent.start_link(fn -> [] end, name: __MODULE__)
     end
@@ -816,7 +822,7 @@ defmodule RaftedValueTest do
       !(self() in isolated) and !(to in isolated)
     end
 
-    def send_event(server, event) do
+    def cast(server, event) do
       if reachable?(server) do
         :gen_statem.cast(server, event)
       else

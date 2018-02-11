@@ -247,7 +247,7 @@ defmodule RaftedValue.Server do
             case Logs.make_append_entries_req(new_logs, current_term, from, Monotonic.millis()) do
               {:ok, append_req} ->
                 req = %TimeoutNow{append_entries_req: append_req}
-                send_event(new_state2, from, req)
+                cast(new_state2, from, req)
                 convert_state_as_follower(new_state2, current_term) |> next_state(:follower) # step down in order not to serve client requests any more
               {:too_old, _} ->
                 # `from`'s logs lag too behind => try leader change next time
@@ -403,11 +403,11 @@ defmodule RaftedValue.Server do
   defunp send_append_entries(%State{current_term: term, logs: logs} = state, follower :: pid, now :: Monotonic.t) :: State.t do
     case Logs.make_append_entries_req(logs, term, follower, now) do
       {:ok, req} ->
-        send_event(state, follower, req)
+        cast(state, follower, req)
         state
       {:too_old, new_logs} ->
         %State{state | logs: new_logs}
-        |> send_snapshot(follower, fn(mod, snapshot) -> mod.send_event(follower, snapshot) end)
+        |> send_snapshot(follower, fn(mod, snapshot) -> mod.cast(follower, snapshot) end)
       :error ->
         # `follower` is not included in `logs`; this indicates that `follower` is already removed => neglect
         state
@@ -485,7 +485,7 @@ defmodule RaftedValue.Server do
     Members.other_members_list(members) |> Enum.each(fn member ->
       {last_log_term, last_log_index, _, _} = Logs.last_entry(logs)
       req = %RequestVoteRequest{term: term, candidate_pid: self(), last_log: {last_log_term, last_log_index}, replacing_leader: replacing_leader?}
-      send_event(state, member, req)
+      cast(state, member, req)
     end)
   end
 
@@ -590,7 +590,7 @@ defmodule RaftedValue.Server do
                                                            entries: entries, i_leader_commit: i_leader_commit, leader_timestamp: leader_timestamp},
                                      %State{members: members, current_term: current_term, logs: logs, persistence: persistence} = state) do
     reply_as_failure = fn larger_term ->
-      send_event(state, leader_pid, %AppendEntriesResponse{from: self(), term: larger_term, success: false, leader_timestamp: leader_timestamp})
+      cast(state, leader_pid, %AppendEntriesResponse{from: self(), term: larger_term, success: false, leader_timestamp: leader_timestamp})
     end
 
     if term < current_term do
@@ -605,7 +605,7 @@ defmodule RaftedValue.Server do
         new_state1 = %State{state | members: new_members2, current_term: term, logs: new_logs}
         new_state2 = Enum.reduce(entries_to_apply, new_state1, &nonleader_apply_committed_log_entry/2) |> persist_log_entries(entries_to_persist)
         reply = %AppendEntriesResponse{from: self(), term: term, success: true, i_replicated: new_logs.i_max, leader_timestamp: leader_timestamp}
-        send_event(new_state2, leader_pid, reply)
+        cast(new_state2, leader_pid, reply)
         new_state2
       else
         # this follower does not have `prev_log` => ask leader to resend older logs
@@ -628,7 +628,7 @@ defmodule RaftedValue.Server do
           election.voted_for in [nil, candidate] and
           Logs.candidate_log_up_to_date?(logs, last_log))
         response = %RequestVoteResponse{from: self(), term: current_term, vote_granted: grant_vote?}
-        send_event(state, candidate, response)
+        cast(state, candidate, response)
         if grant_vote? do
           %State{state | election: Election.vote_for(election, candidate, config)}
         else
@@ -639,7 +639,7 @@ defmodule RaftedValue.Server do
     else
       # Reject vote request if leader lease has not yet expired
       response = %RequestVoteResponse{from: self(), term: current_term, vote_granted: false}
-      send_event(state, candidate, response)
+      cast(state, candidate, response)
       next_state(state, current_state_name)
     end
   end
@@ -711,8 +711,8 @@ defmodule RaftedValue.Server do
   #
   # utilities (misc)
   #
-  defp send_event(%State{config: %Config{communication_module: mod}}, dest, event) do
-    mod.send_event(dest, event)
+  defp cast(%State{config: %Config{communication_module: mod}}, dest, event) do
+    mod.cast(dest, event)
   end
 
   defp reply(%State{config: %Config{communication_module: mod}}, from, reply) do
@@ -754,7 +754,7 @@ defmodule RaftedValue.Server do
         hook.on_follower_added(data, follower_pid)
         %State{state | members: Members.membership_change_committed(members, index)}
       {_term, index , :remove_follower, follower_pid} ->
-        send_event(state, follower_pid, :remove_follower_completed) # don't use :gen_statem.stop in order to stop `follower_pid` only when it's actually a follower
+        cast(state, follower_pid, :remove_follower_completed) # don't use :gen_statem.stop in order to stop `follower_pid` only when it's actually a follower
         hook.on_follower_removed(data, follower_pid)
         %State{state | members: Members.membership_change_committed(members, index)}
       {_term, _index, :restore_from_files, leader_pid} ->

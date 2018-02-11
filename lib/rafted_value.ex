@@ -87,7 +87,7 @@ defmodule RaftedValue do
   Available options:
 
   - `leader_hook_module`: An implementation of `RaftedValue.LeaderHook`. Defaults to `RaftedValue.LeaderHook.NoOp`.
-  - `communication_module`: A module to define member-to-member async communication (`send_event/2` and `reply/2`).
+  - `communication_module`: A module to define member-to-member async communication (`cast/2` and `reply/2`).
     Defaults to `RaftedValue.RemoteMessageGateway`.
     This is configurable for internal testing purpose.
   - `heartbeat_timeout`: Raft's heartbeat timeout in milliseconds. Defaults to `200`.
