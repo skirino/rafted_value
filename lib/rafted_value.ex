@@ -166,9 +166,10 @@ defmodule RaftedValue do
   defun command(leader      :: GenServer.server,
                 command_arg :: Data.command_arg,
                 timeout     :: timeout \\ 5000,
-                id          :: command_identifier \\ make_ref()) :: {:ok, Data.command_ret} | {:error, :noproc | :timeout | not_leader} do
+                id          :: command_identifier \\ make_ref(),
+                call_module :: module \\ :gen_statem) :: {:ok, Data.command_ret} | {:error, :noproc | :timeout | not_leader} do
     catch_exit(fn ->
-      call(leader, {:command, command_arg, id}, timeout)
+      call(leader, {:command, command_arg, id}, timeout, call_module)
     end)
   end
 
@@ -179,11 +180,12 @@ defmodule RaftedValue do
   Caller process should be prepared to handle delayed reply
   (e.g. by dropping delayed reply by `handle_info(_msg, state)`).
   """
-  defun query(leader    :: GenServer.server,
-              query_arg :: Data.query_arg,
-              timeout   :: timeout \\ 5000) :: {:ok, Data.query_ret} | {:error, :noproc | :timeout | not_leader} do
+  defun query(leader      :: GenServer.server,
+              query_arg   :: Data.query_arg,
+              timeout     :: timeout \\ 5000,
+              call_module :: module \\ :gen_statem) :: {:ok, Data.query_ret} | {:error, :noproc | :timeout | not_leader} do
     catch_exit(fn ->
-      call(leader, {:query, query_arg}, timeout)
+      call(leader, {:query, query_arg}, timeout, call_module)
     end)
   end
 
@@ -243,7 +245,7 @@ defmodule RaftedValue do
     Persistence.read_last_log_index(dir)
   end
 
-  defp call(server, msg, timeout \\ 5000) do
-    :gen_statem.call(server, msg, {:dirty_timeout, timeout})
+  defp call(server, msg, timeout \\ 5000, call_module \\ :gen_statem) do
+    call_module.call(server, msg, {:dirty_timeout, timeout})
   end
 end
