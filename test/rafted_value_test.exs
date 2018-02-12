@@ -819,7 +819,7 @@ defmodule RaftedValueTest do
 
     defp reachable?(to) do
       isolated = Agent.get(__MODULE__, fn l -> l end)
-      !(self() in isolated) and !(to in isolated)
+      (self() not in isolated) and (to not in isolated)
     end
 
     def cast(server, event) do
