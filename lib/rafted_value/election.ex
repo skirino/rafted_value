@@ -11,7 +11,7 @@ defmodule RaftedValue.Election do
     leader_message_at: TG.nilable(Monotonic),
   ]
 
-  defun new_for_leader :: t do
+  defun new_for_leader() :: t do
     %__MODULE__{voted_for: self()}
   end
 

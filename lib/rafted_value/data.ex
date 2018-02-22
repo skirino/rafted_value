@@ -22,7 +22,7 @@ defmodule RaftedValue.Data do
   Whenever a new consensus group is started by `RaftedValue.start_link/2` (called with `:create_new_consensus_group`),
   this function is called to initialize the stored value.
   """
-  @callback new :: data
+  @callback new() :: data
 
   @doc """
   Generic read/write operation on the stored value.
