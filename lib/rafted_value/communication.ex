@@ -12,9 +12,10 @@ defmodule RaftedValue.RemoteMessageGateway do
 
   Essentially `cast/2` behaves as `:gen_statem.cast/2` and `reply/2` behaves as `:gen_statem.reply/2`.
 
-  This is introduced in order to work-around slow message passing to unreachable nodes.
-  In other words, it uses a temporary process to send message to a not-yet-connected node,
-  as in the same way as e.g. `:gen_server.cast/2`.
+  This is introduced in order to work-around slow message passing to unreachable nodes;
+  if the target node is not connected to `Node.self()`, functions in this node give up delivering message.
+  In order to recover from temporary network issues, reconnecting to disconnected nodes should be tried elsewhere.
+  Note that `:raft_fleet` (since 0.5.0) periodically tries to re-establish inter-node connections out of the box.
   """
 
   @behaviour RaftedValue.Communication
@@ -33,11 +34,7 @@ defmodule RaftedValue.RemoteMessageGateway do
   end
 
   defp do_send(dest, msg) do
-    case :erlang.send(dest, msg, [:noconnect]) do
-      :noconnect ->
-        spawn(:erlang, :send, [dest, msg])
-        :ok
-      _otherwise -> :ok
-    end
+    :erlang.send(dest, msg, [:noconnect])
+    :ok
   end
 end
