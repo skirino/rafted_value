@@ -24,11 +24,6 @@ defmodule RaftedValue.RemoteMessageGateway do
     do_send(fsm_ref, {:"$gen_cast", event})
   end
 
-  # This function is kept for backward compatibility for `< 0.8.0`; will be removed in `0.9.0`.
-  def send_event(fsm_ref, event) do
-    do_send(fsm_ref, {:"$gen_cast", event})
-  end
-
   def reply({pid, tag}, reply) do
     do_send(pid, {tag, reply})
   end
