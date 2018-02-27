@@ -37,9 +37,6 @@ defmodule RaftedValue do
     On the other hand larger expansion factor may lead to longer recovery time.
     Defaults to `#{@default_log_file_expansion_factor}`.
 
-  For backward compatibility, passing a non-`nil` atom as 2nd argument is interpreted as `[name: name_atom]`.
-  This behavior will be removed in a future release.
-
   ## Restoring state from snapshot and log files
 
   `RaftedValue` implements state recovery using log and snapshot files.
@@ -65,12 +62,7 @@ defmodule RaftedValue do
   end
 
   defp normalize_options(options) do
-    case options do
-      nil -> []
-      name when is_atom(name) -> [name: name]
-      list when is_list(list) -> list
-    end
-    |> Keyword.put_new(:log_file_expansion_factor, @default_log_file_expansion_factor)
+    Keyword.put_new(options, :log_file_expansion_factor, @default_log_file_expansion_factor)
   end
 
   defp start_link_impl(info, options) do
