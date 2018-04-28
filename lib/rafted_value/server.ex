@@ -82,6 +82,7 @@ defmodule RaftedValue.Server do
       command_results: CommandResults, # replicated using raft logs (i.e. reproducible from logs)
       config:          Config,
       persistence:     Croma.TypeGen.nilable(Persistence),
+      restoring?:      Croma.Boolean,
     ]
   end
 
@@ -117,7 +118,7 @@ defmodule RaftedValue.Server do
       nil ->
         snapshot = generate_empty_snapshot_for_lonely_leader(config)
         logs     = Logs.new_for_lonely_leader(snapshot.last_committed_entry, [])
-        build_state_from_snapshot(snapshot, logs, nil)
+        build_state_from_snapshot(snapshot, logs, nil, false)
       dir ->
         log_expansion_factor = Keyword.fetch!(options, :log_file_expansion_factor)
         case Snapshot.read_lastest_snapshot_and_logs_if_available(dir) do
@@ -125,7 +126,7 @@ defmodule RaftedValue.Server do
             snapshot    = generate_empty_snapshot_for_lonely_leader(config)
             logs        = Logs.new_for_lonely_leader(snapshot.last_committed_entry, [])
             persistence = Persistence.new_with_initial_snapshotting(dir, log_expansion_factor, snapshot)
-            build_state_from_snapshot(snapshot, logs, persistence)
+            build_state_from_snapshot(snapshot, logs, persistence, false)
           tuple ->
             recover_state_from_snapshot_and_log(dir, tuple, log_expansion_factor)
         end
@@ -149,7 +150,8 @@ defmodule RaftedValue.Server do
                                              command_results: command_results,
                                              config:          config},
                                    logs        :: Logs.t,
-                                   persistence :: nil | Persistence.t) :: State.t do
+                                   persistence :: nil | Persistence.t,
+                                   restoring?  :: boolean) :: State.t do
     %State{
       members:         members,
       current_term:    term,
@@ -160,6 +162,7 @@ defmodule RaftedValue.Server do
       command_results: command_results,
       config:          config,
       persistence:     persistence,
+      restoring?:      restoring?,
     }
   end
 
@@ -174,10 +177,11 @@ defmodule RaftedValue.Server do
     {logs2, entry_restore}    = Logs.add_entry_on_restored_from_files(logs1, snapshot.term)
     persistence               = Persistence.new_with_disk_snapshot(dir, log_expansion_factor, snapshot_meta, entry_restore)
     {logs3, entries_to_apply} = Logs.commit_to_latest(logs2, persistence)
-    state1                    = build_state_from_snapshot(snapshot, logs3, persistence)
+    state1                    = build_state_from_snapshot(snapshot, logs3, persistence, true)
     state2                    = Enum.reduce(entries_to_apply, state1, &leader_apply_committed_log_entry_without_membership_change/2) # `entry_restore` results in a no-op and thus neglected
-    run_restored_hook(state2)
-    state2
+    state3                    = %State{state2 | restoring?: false}
+    run_restored_hook(state3)
+    state3
   end
 
   defp run_restored_hook(%State{config: %Config{leader_hook_module: hook}, data: data}) do
@@ -199,7 +203,17 @@ defmodule RaftedValue.Server do
           log_expansion_factor = Keyword.fetch!(options, :log_file_expansion_factor)
           Persistence.new_with_snapshot_sent_from_leader(dir, log_expansion_factor, snapshot)
       end
-    %State{members: members, current_term: term, election: election, logs: logs, data: data, command_results: command_results, config: config, persistence: persistence}
+    %State{
+      members:         members,
+      current_term:    term,
+      election:        election,
+      logs:            logs,
+      data:            data,
+      command_results: command_results,
+      config:          config,
+      persistence:     persistence,
+      restoring?:      false,
+    }
   end
 
   defunp call_add_server_with_fault_injection(known_members :: [GenServer.server], options :: [RaftedValue.option]) :: Snapshot.t do
