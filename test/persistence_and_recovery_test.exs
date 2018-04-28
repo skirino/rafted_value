@@ -2,12 +2,13 @@ defmodule RaftedValue.PersistenceAndRecoveryTest do
   use ExUnit.Case
   alias RaftedValue.{LogEntry, Snapshot, Persistence}
 
-  @config  RaftedValue.make_config(JustAnInt, [])
+  @config  RaftedValue.make_config(JustAnInt, [leader_hook_module: MessageSendingHook])
   @name    :foo
   @tmp_dir "tmp"
 
   setup do
     File.rm_rf!(@tmp_dir)
+    Process.register(self(), :test_runner)
     on_exit(fn ->
       File.rm_rf!(@tmp_dir)
     end)
@@ -59,19 +60,22 @@ defmodule RaftedValue.PersistenceAndRecoveryTest do
 
   test "persist logs and snapshots and recover by reading them" do
     {:ok, _} = RaftedValue.start_link({:create_new_consensus_group, @config}, [name: @name, persistence_dir: @tmp_dir])
+    refute_received(_)
     assert in_memory_and_disk_logs_same?(1..1)
     assert :gen_statem.stop(@name) == :ok
     snapshot_path1 = Path.join(@tmp_dir, "snapshot_0_1")
     assert %Snapshot{} = read_snapshot(snapshot_path1)
     snapshot_committed_index1 = 1
 
-    {:ok, _} = RaftedValue.start_link({:create_new_consensus_group, @config}, [name: @name, persistence_dir: @tmp_dir])
+    {:ok, pid} = RaftedValue.start_link({:create_new_consensus_group, @config}, [name: @name, persistence_dir: @tmp_dir])
+    assert_received({:restored_from_files, ^pid})
     assert in_memory_and_disk_logs_same?(snapshot_committed_index1 .. snapshot_committed_index1 + 1)
     assert RaftedValue.command(@name, :inc) == {:ok, 0}
     assert in_memory_and_disk_logs_same?(1..3)
     assert :gen_statem.stop(@name) == :ok
 
-    {:ok, _} = RaftedValue.start_link({:create_new_consensus_group, @config}, [name: @name, persistence_dir: @tmp_dir])
+    {:ok, pid} = RaftedValue.start_link({:create_new_consensus_group, @config}, [name: @name, persistence_dir: @tmp_dir])
+    assert_received({:restored_from_files, ^pid})
     assert in_memory_and_disk_logs_same?(snapshot_committed_index1 .. snapshot_committed_index1 + 3)
     Enum.each(1 .. 40, fn i ->
       assert RaftedValue.command(@name, :inc) == {:ok, i}
@@ -82,7 +86,8 @@ defmodule RaftedValue.PersistenceAndRecoveryTest do
     assert %Snapshot{} = read_snapshot(snapshot_path2)
     snapshot_committed_index2 = snapshot_path_to_committed_index(snapshot_path2)
 
-    {:ok, _} = RaftedValue.start_link({:create_new_consensus_group, @config}, [name: @name, persistence_dir: @tmp_dir])
+    {:ok, pid} = RaftedValue.start_link({:create_new_consensus_group, @config}, [name: @name, persistence_dir: @tmp_dir])
+    assert_receive({:restored_from_files, ^pid})
     assert in_memory_and_disk_logs_same?(snapshot_committed_index2 .. snapshot_committed_index1 + 44)
     assert RaftedValue.query(@name, :get) == {:ok, 41}
     assert :gen_statem.stop(@name) == :ok

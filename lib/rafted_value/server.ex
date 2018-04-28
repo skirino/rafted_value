@@ -126,17 +126,8 @@ defmodule RaftedValue.Server do
             logs        = Logs.new_for_lonely_leader(snapshot.last_committed_entry, [])
             persistence = Persistence.new_with_initial_snapshotting(dir, log_expansion_factor, snapshot)
             build_state_from_snapshot(snapshot, logs, persistence)
-          {snapshot_from_disk, snapshot_meta, log_entries} ->
-            # In this case we neglect `config` given in the argument to `RaftedValue.start_link/2`.
-            # On the other hand we discard `members` obtained from disk, as `self()` is the sole member of this newly-spawned consensus group.
-            members                   = Members.new_for_lonely_leader()
-            snapshot                  = %Snapshot{snapshot_from_disk | members: members}
-            logs1                     = Logs.new_for_lonely_leader(snapshot.last_committed_entry, log_entries)
-            {logs2, entry_restore}    = Logs.add_entry_on_restored_from_files(logs1, snapshot.term)
-            persistence               = Persistence.new_with_disk_snapshot(dir, log_expansion_factor, snapshot_meta, entry_restore)
-            {logs3, entries_to_apply} = Logs.commit_to_latest(logs2, persistence)
-            state                     = build_state_from_snapshot(snapshot, logs3, persistence)
-            Enum.reduce(entries_to_apply, state, &leader_apply_committed_log_entry_without_membership_change/2) # `entry_restore` results in a no-op and thus neglected
+          tuple ->
+            recover_state_from_snapshot_and_log(dir, tuple, log_expansion_factor)
         end
     end
   end
@@ -170,6 +161,30 @@ defmodule RaftedValue.Server do
       config:          config,
       persistence:     persistence,
     }
+  end
+
+  defp recover_state_from_snapshot_and_log(dir,
+                                           {snapshot_from_disk, snapshot_meta, log_entries},
+                                           log_expansion_factor) do
+    # In this case we neglect `config` given in the argument to `RaftedValue.start_link/2`.
+    # On the other hand we discard `members` obtained from disk, as `self()` is the sole member of this newly-spawned consensus group.
+    members                   = Members.new_for_lonely_leader()
+    snapshot                  = %Snapshot{snapshot_from_disk | members: members}
+    logs1                     = Logs.new_for_lonely_leader(snapshot.last_committed_entry, log_entries)
+    {logs2, entry_restore}    = Logs.add_entry_on_restored_from_files(logs1, snapshot.term)
+    persistence               = Persistence.new_with_disk_snapshot(dir, log_expansion_factor, snapshot_meta, entry_restore)
+    {logs3, entries_to_apply} = Logs.commit_to_latest(logs2, persistence)
+    state1                    = build_state_from_snapshot(snapshot, logs3, persistence)
+    state2                    = Enum.reduce(entries_to_apply, state1, &leader_apply_committed_log_entry_without_membership_change/2) # `entry_restore` results in a no-op and thus neglected
+    run_restored_hook(state2)
+    state2
+  end
+
+  defp run_restored_hook(%State{config: %Config{leader_hook_module: hook}, data: data}) do
+    case hook do
+      nil -> :ok
+      _   -> hook.on_restored_from_files(data)
+    end
   end
 
   defunp initialize_follower_state(known_members :: [GenServer.server], options :: [RaftedValue.option]) :: State.t do
@@ -757,8 +772,7 @@ defmodule RaftedValue.Server do
         cast(state, follower_pid, :remove_follower_completed) # don't use :gen_statem.stop in order to stop `follower_pid` only when it's actually a follower
         hook.on_follower_removed(data, follower_pid)
         %State{state | members: Members.membership_change_committed(members, index)}
-      {_term, _index, :restore_from_files, leader_pid} ->
-        if leader_pid == self(), do: hook.on_restored_from_files(data)
+      {_term, _index, :restore_from_files, _leader_pid} ->
         state
     end
   end
