@@ -36,7 +36,7 @@ defmodule RaftedValue.Monotonic do
   defun valid?(v :: term) :: boolean, do: is_integer(v)
 
   defun millis() :: t do
-    System.monotonic_time(:milliseconds)
+    System.monotonic_time(:millisecond)
   end
 end
 
