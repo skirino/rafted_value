@@ -24,7 +24,7 @@ defmodule RaftedValue.PersistenceAndRecoveryTest do
         entries
       end)
     Enum.map(all_entries, fn {_, i, _, _} -> i end)
-    |> Enum.chunk(2, 1)
+    |> Enum.chunk_every(2, 1, :discard)
     |> Enum.each(fn [i1, i2] ->
       assert i2 - i1 == 1
     end)

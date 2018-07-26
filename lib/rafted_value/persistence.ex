@@ -122,7 +122,7 @@ defmodule RaftedValue.Persistence do
     Path.wildcard(Path.join(dir, "log_*"))
     |> Enum.map(fn path -> {extract_first_log_index_from_path(path), path} end)
     |> Enum.sort()
-    |> Enum.chunk(2, 1, [nil])
+    |> Enum.chunk_every(2, 1, [nil])
     |> Enum.map(fn
       [{_, path}, {i_next, _}] -> {path, i_next - 1}
       [{_, path}, nil        ] -> {path, :infinity } # atom is larger than any integers
