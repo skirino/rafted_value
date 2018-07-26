@@ -6,8 +6,8 @@ defmodule RaftedValue.Mixfile do
   def project() do
     [
       app:             :rafted_value,
-      version:         "0.9.3",
-      elixir:          "~> 1.5",
+      version:         "0.10.0",
+      elixir:          "~> 1.6",
       build_embedded:  Mix.env() == :prod,
       start_permanent: Mix.env() == :prod,
       deps:            deps(),
@@ -25,10 +25,10 @@ defmodule RaftedValue.Mixfile do
 
   defp deps() do
     [
-      {:croma  , "~> 0.7"},
-      {:coverex, "~> 1.4" , only: :test},
-      {:dialyze, "~> 0.2" , only: :dev },
-      {:ex_doc , "~> 0.15", only: :dev },
+      {:croma   , "~> 0.9"},
+      {:coverex , "~> 1.4"   , only: :test},
+      {:dialyxir, "~> 0.5"   , only: :dev },
+      {:ex_doc  , "~> 0.18.0", only: :dev },
     ]
   end
 
