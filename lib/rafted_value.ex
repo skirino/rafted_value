@@ -8,7 +8,11 @@ defmodule RaftedValue do
   alias RaftedValue.{TermNumber, Config, Server, Data, LogIndex, Persistence}
 
   @type consensus_group_info :: {:create_new_consensus_group, Config.t} | {:join_existing_consensus_group, [GenServer.server]}
-  @type option               :: {:name, atom} | {:persistence_dir, Path.t} | {:log_file_expansion_factor, number}
+
+  @type option :: {:name, atom}
+                | {:persistence_dir, Path.t}
+                | {:log_file_expansion_factor, number}
+                | {:spawn_opt, [:proc_lib.spawn_option]}
 
   @default_log_file_expansion_factor 10
 
@@ -36,6 +40,7 @@ defmodule RaftedValue do
     Small value means frequent snapshotting, which can result in high overhead.
     On the other hand larger expansion factor may lead to longer recovery time.
     Defaults to `#{@default_log_file_expansion_factor}`.
+  - `:spawn_opt`: A keyword list of options to be passed to [`:erlang.spawn_opt/4`](http://erlang.org/doc/man/erlang.html#spawn_opt-4).
 
   ## Restoring state from snapshot and log files
 
@@ -65,10 +70,11 @@ defmodule RaftedValue do
     Keyword.put_new(options, :log_file_expansion_factor, @default_log_file_expansion_factor)
   end
 
-  defp start_link_impl(info, options) do
-    case Keyword.pop(options, :name) do
-      {nil , options2} -> :gen_statem.start_link(                Server, {info, options2}, [])
-      {name, options2} -> :gen_statem.start_link({:local, name}, Server, {info, options2}, [])
+  defp start_link_impl(info, options0) do
+    {spawn_opts, options1} = Keyword.pop(options0, :spawn_opt, [])
+    case Keyword.pop(options1, :name) do
+      {nil , options2} -> :gen_statem.start_link(                Server, {info, options2}, [spawn_opt: spawn_opts])
+      {name, options2} -> :gen_statem.start_link({:local, name}, Server, {info, options2}, [spawn_opt: spawn_opts])
     end
   end
 
