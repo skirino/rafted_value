@@ -561,7 +561,7 @@ defmodule RaftedValueTest do
 
   defp assert_server_state_invariants(pid, :leader, state) do
     assert state.members.leader == pid
-    assert is_nil(state.members.uncommitted_membership_change) or is_nil(state.members.pending_leader_change)
+    assert_server_membership_invariants(state)
     assert state.election.voted_for == pid
     refute state.election.timer
     assert state.leadership.heartbeat_timer
@@ -581,14 +581,36 @@ defmodule RaftedValueTest do
 
   defp assert_server_state_invariants(pid, :candidate, state) do
     assert state.members.leader == nil
+    assert state.members.pending_leader_change == nil
+    assert_server_membership_invariants(state)
     assert state.election.voted_for == pid
     assert state.election.timer
     refute state.leadership
   end
 
   defp assert_server_state_invariants(_pid, :follower, state) do
+    assert state.members.pending_leader_change == nil
+    assert_server_membership_invariants(state)
     assert state.election.timer
     refute state.leadership
+  end
+
+  defp assert_server_membership_invariants(state) do
+    membership = state.members
+    assert is_nil(membership.uncommitted_membership_change) or is_nil(membership.pending_leader_change)
+    assert_member = fn
+      nil                         -> :ok
+      p when is_pid(p)            -> assert PidSet.member?(membership.all, p)
+      {_, _, :add_follower   , p} -> assert PidSet.member?(membership.all, p)
+      {_, _, :remove_follower, p} -> refute PidSet.member?(membership.all, p)
+    end
+    assert_member.(membership.leader)
+    assert_member.(membership.uncommitted_membership_change)
+    assert_member.(membership.pending_leader_change)
+    case membership.uncommitted_membership_change do
+      nil                  -> :ok
+      {_, i, _, _} = entry -> assert state.logs.map[i] == entry
+    end
   end
 
   defp assert_server_logs_invariants(logs, persistence) do
