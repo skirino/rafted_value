@@ -123,7 +123,7 @@ defmodule RaftedValue.Logs do
                      current_term        :: TermNumber.t,
                      followers           :: FollowerIndices.t) :: boolean do
     if term == current_term do
-      follower_pids = members_set |> PidSet.delete(self()) |> PidSet.to_list
+      follower_pids = members_set |> PidSet.delete(self()) |> PidSet.to_list()
       n_necessary_followers = div(length(follower_pids) + 1, 2)
       n_uptodate_followers = Enum.count(follower_pids, fn f ->
         case followers[f] do

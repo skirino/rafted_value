@@ -44,7 +44,7 @@ defmodule RaftedValue.Members do
       reject_if_leader_changing(m, fn ->
         cond do
           old_follower == self()            -> {:error, :cannot_remove_leader}
-          PidSet.member?(all, old_follower) -> %__MODULE__{m | all: PidSet.delete(all, old_follower), uncommitted_membership_change: entry} |> R.pure
+          PidSet.member?(all, old_follower) -> %__MODULE__{m | all: PidSet.delete(all, old_follower), uncommitted_membership_change: entry} |> R.pure()
           true                              -> {:error, :not_member}
         end
       end)

@@ -573,7 +573,7 @@ defmodule RaftedValueTest do
         _                                       -> state.members.all
       end
       |> PidSet.delete(pid)
-      |> PidSet.to_list
+      |> PidSet.to_list()
     followers_in_logs = Map.keys(state.logs.followers)
     difference = (followers_in_logs -- expected) ++ (expected -- followers_in_logs)
     assert length(difference) <= 1 # tolerate up to 1 difference
