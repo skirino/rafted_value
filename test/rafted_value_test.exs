@@ -162,6 +162,21 @@ defmodule RaftedValueTest do
     assert RaftedValue.status(leader)[:unresponsive_followers] == [] # removed follower should not be listed as unresponsive
   end
 
+  test "should unset uncommitted_membership_change when log entry for add_follower/remove_follower is overwritten" do
+    CommunicationWithNetsplit.start()
+    conf = Map.put(@conf, :communication_module, CommunicationWithNetsplit)
+    {m1, [m2, m3]} = make_cluster(2, conf)
+    CommunicationWithNetsplit.set([m1])
+    catch_exit RaftedValue.remove_follower(m1, m2)
+    assert RaftedValue.status(m2).leader in [m2, m3]
+    CommunicationWithNetsplit.set([])
+    wait_until_state_name_changes(m1, :follower)
+    assert RaftedValue.status(m1).leader in [m2, m3]
+    {:follower, state} = :sys.get_state(m1)
+    refute Map.values(state.logs.map) |> Enum.any?(&match?({_, _, :remove_follower, _}, &1))
+    assert state.members.uncommitted_membership_change == nil
+  end
+
   test "replace_leader should eventually replace leader" do
     {leader, [follower1, follower2]} = make_cluster(2)
 
@@ -816,39 +831,6 @@ defmodule RaftedValueTest do
 
   test "3,4,5,6,7-member cluster should maintain invariants and keep responsive in the face of minority failure (persisted)" do
     run_consensus_group_and_check_responsiveness_with_minority_failures(true)
-  end
-
-  defmodule CommunicationWithNetsplit do
-    @behaviour RaftedValue.Communication
-
-    def start() do
-      Agent.start_link(fn -> [] end, name: __MODULE__)
-    end
-
-    def set(pids) do
-      Agent.update(__MODULE__, fn _ -> pids end)
-    end
-
-    defp reachable?(to) do
-      isolated = Agent.get(__MODULE__, fn l -> l end)
-      (self() not in isolated) and (to not in isolated)
-    end
-
-    def cast(server, event) do
-      if reachable?(server) do
-        :gen_statem.cast(server, event)
-      else
-        :ok
-      end
-    end
-
-    def reply({to, _} = from, reply) do
-      if reachable?(to) do
-        :gen_statem.reply(from, reply)
-      else
-        :ok
-      end
-    end
   end
 
   defp assert_leader_status(leader, members, isolated) do

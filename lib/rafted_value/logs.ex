@@ -205,16 +205,17 @@ defmodule RaftedValue.Logs do
     end
   end
 
-  defun append_entries(%__MODULE__{map: map, i_max: i_max, i_committed: old_i_committed} = logs,
-                       members         :: Members.t,
+  defun append_entries(%__MODULE__{map: map0, i_max: i_max, i_committed: old_i_committed} = logs,
+                       members0        :: Members.t,
                        entries         :: [LogEntry.t],
                        i_leader_commit :: LogIndex.t,
                        persistence     :: nil | Persistence.t) :: {t, Members.t, [LogEntry.t], [LogEntry.t]} do
-    {new_map, entries_to_persist_reversed} =
-      Enum.reduce(entries, {map, []}, fn({_, i, _, _} = e, {m, acc}) ->
-        case m[i] do
-          ^e                -> {m, acc}
-          _nil_or_different -> {Map.put(m, i, e), [e | acc]}
+    {new_map, members2, entries_to_persist_reversed} =
+      Enum.reduce(entries, {map0, members0, []}, fn({_, i, _, _} = e, {map1, members1, acc}) ->
+        case map1[i] do
+          ^e    -> {map1               , members1                                , acc      }
+          nil   -> {Map.put(map1, i, e), members1                                , [e | acc]}
+          entry -> {Map.put(map1, i, e), reset_membership_change(members1, entry), [e | acc]} # uncommitted log entry is overridden
         end
       end)
     new_i_max          = if Enum.empty?(entries), do: i_max, else: max(i_max, elem(List.last(entries), 1))
@@ -222,7 +223,7 @@ defmodule RaftedValue.Logs do
     new_logs           = %__MODULE__{logs | map: new_map, i_max: new_i_max, i_committed: new_i_committed} |> truncate_old_logs(persistence)
     entries_to_apply   = slice_entries(new_map, old_i_committed + 1, new_i_committed)
     entries_to_persist = Enum.reverse(entries_to_persist_reversed)
-    new_members        = Enum.reduce(entries_to_persist, members, &change_members/2)
+    new_members        = Enum.reduce(entries_to_persist, members2, &change_members/2)
     {new_logs, new_members, entries_to_apply, entries_to_persist}
   end
 
@@ -248,6 +249,15 @@ defmodule RaftedValue.Logs do
       {_t, _i, :remove_follower   , pid} -> %Members{members | all: PidSet.delete(set, pid)      , uncommitted_membership_change: entry}
       {_t, _i, :restore_from_files, pid} -> %Members{members | all: PidSet.put(PidSet.new(), pid), uncommitted_membership_change: nil  }
       _                                  -> members
+    end
+  end
+
+  defunp reset_membership_change(%Members{uncommitted_membership_change: change} = members,
+                                 entry_to_be_overridden :: LogEntry.t) :: Members.t do
+    if change == entry_to_be_overridden do
+      %Members{members | uncommitted_membership_change: nil}
+    else
+      members
     end
   end
 
