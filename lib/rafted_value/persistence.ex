@@ -98,12 +98,22 @@ defmodule RaftedValue.Persistence do
     :ok = :gen_statem.call(server_pid, message, :infinity)
 
     # cleanup obsolete snapshots and logs
-    Path.wildcard(Path.join(dir, "snapshot_*"))
-    |> Enum.filter(fn path -> Path.basename(path) != snapshot_basename end)
-    |> Enum.drop(1)
+    find_obsolete_snapshots(dir, snapshot_basename)
     |> Enum.each(&File.rm!/1)
     find_log_files_with_committed_entries_only(dir, last_committed_index)
     |> Enum.each(&File.rm!/1)
+  end
+
+  defunp find_obsolete_snapshots(dir :: Path.t, snapshot_basename :: String.t) :: [Path.t] do
+    Path.wildcard(Path.join(dir, "snapshot_*"))
+    |> Enum.filter(fn path -> Path.basename(path) != snapshot_basename end)
+    |> Enum.sort_by(&snapshot_path_to_term_and_index/1, &>=/2)
+    |> Enum.drop(1) # Keep one more latest snapshot
+  end
+
+  defunp snapshot_path_to_term_and_index(p :: Path.t) :: {TermNumber.t, LogIndex.t} do
+    ["snapshot", t, i] = Path.basename(p) |> String.split("_")
+    {String.to_integer(t), String.to_integer(i)}
   end
 
   defunp find_log_files_with_committed_entries_only(dir :: Path.t, i_committed :: LogIndex.t) :: [Path.t] do

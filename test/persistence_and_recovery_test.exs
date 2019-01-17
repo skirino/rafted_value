@@ -175,4 +175,15 @@ defmodule RaftedValue.PersistenceAndRecoveryTest do
     assert :gen_statem.stop(n2) == :ok
     assert :gen_statem.stop(p2) == :ok
   end
+
+  test "older snapshots should be discarded when making a new one" do
+    {:ok, p1} = RaftedValue.start_link({:create_new_consensus_group, @config}, [persistence_dir: @tmp_dir])
+    Enum.each(0 .. 100, fn i ->
+      assert RaftedValue.command(p1, :inc) == {:ok, i}
+    end)
+    assert :gen_statem.stop(p1) == :ok
+    snapshot_paths = Path.wildcard(Path.join(@tmp_dir, "snapshot_*"))
+    assert length(snapshot_paths) == 2
+    refute Path.join(@tmp_dir, "snapshot_0_1") in snapshot_paths
+  end
 end
