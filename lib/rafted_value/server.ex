@@ -7,57 +7,57 @@ defmodule RaftedValue.Server do
   # ## Events
   #
   # - async (member-to-member messages)
-  #   - defined as Raft RPC (all contain `term`)
-  #     - AppendEntriesRequest
-  #     - AppendEntriesResponse
-  #     - RequestVoteRequest
-  #     - RequestVoteResponse
-  #     - InstallSnapshot, InstallSnapshotCompressed
-  #     - TimeoutNow
-  #   - others
-  #     - :heartbeat_timeout
-  #     - :election_timeout
-  #     - :cannot_reach_quorum
-  #     - :remove_follower_completed
-  #     - {:DOWN, _, :process, _, _} # temporary snapshot writer process terminated
+  #     - defined as Raft RPC (all contain `term`)
+  #         - AppendEntriesRequest
+  #         - AppendEntriesResponse
+  #         - RequestVoteRequest
+  #         - RequestVoteResponse
+  #         - InstallSnapshot, InstallSnapshotCompressed
+  #         - TimeoutNow
+  #     - others
+  #         - :heartbeat_timeout
+  #         - :election_timeout
+  #         - :cannot_reach_quorum
+  #         - :remove_follower_completed
+  #         - {:DOWN, _, :process, _, _} # temporary snapshot writer process terminated
   # - sync
-  #   - defined in Raft (client-to-leader messages)
-  #     - {:command, arg, cmd_id}
-  #     - {:query, arg}
-  #     - {:change_config, new_config}
-  #     - {:add_follower, pid}
-  #     - {:remove_follower, pid}
-  #     - {:replace_leader, new_leader}
-  #   - others (client-to-anymember messages)
-  #     - {:query_non_leader, arg}
-  #     - {:snapshot_created, path, term, index, size}
-  #     - {:force_remove_member, pid}
-  #     - :status
+  #     - defined in Raft (client-to-leader messages)
+  #         - {:command, arg, cmd_id}
+  #         - {:query, arg}
+  #         - {:change_config, new_config}
+  #         - {:add_follower, pid}
+  #         - {:remove_follower, pid}
+  #         - {:replace_leader, new_leader}
+  #     - others (client-to-anymember messages)
+  #         - {:query_non_leader, arg}
+  #         - {:snapshot_created, path, term, index, size}
+  #         - {:force_remove_member, pid}
+  #         - :status
   #
   # ## State transitions
   #
   # - :leader or :candidate => :follower, when newer term started
-  #   - in this case the incoming message that triggers the transition should be handled as a follower
-  #   - implemented in `become_follower_if_new_term_started`
+  #     - in this case the incoming message that triggers the transition should be handled as a follower
+  #     - implemented in `become_follower_if_new_term_started`
   # - :follower => :candidate, when election_timeout elapses
-  #   - implemented in `follower(:election_timeout, state)`
+  #     - implemented in `follower(:election_timeout, state)`
   # - :candidate => :follower, when new leader found
-  #   - in this case the incoming message that triggers the transition should be handled as a follower
-  #   - implemented in `handle_append_entries_request`
+  #     - in this case the incoming message that triggers the transition should be handled as a follower
+  #     - implemented in `handle_append_entries_request`
   # - :candidate => :leader, when majority agrees
-  #   - implemented in `candidate(%RequestVoteResponse{}, state)` (and in `become_candidate_and_start_new_election/2` for a special case)
+  #     - implemented in `candidate(%RequestVoteResponse{}, state)` (and in `become_candidate_and_start_new_election/2` for a special case)
   # - :leader => :follower, when stepping down to replace leader
-  #   - implemented in `leader(%AppendEntriesResponse{}, state)`
+  #     - implemented in `leader(%AppendEntriesResponse{}, state)`
   # - :leader => :follower, when election timeout elapses without getting responses from majority
-  #   - implemented in `leader(:cannot_reach_quorum, state)`
+  #     - implemented in `leader(:cannot_reach_quorum, state)`
   #
   # ## Misc notes
   #
   # - To make command execution "linearizable":
-  #   1. client assigns a unique ID to each command
-  #   2. servers cache responses of command executions
-  #   3. if cached response is found for a command, don't execute the command twice and just returns cached response
-  #   (note that this is basically equivalent to implicitly establish client session for each request)
+  #   (note that this is basically equivalent to implicitly establish client session for each command)
+  #     1. client assigns a unique ID to each command
+  #     2. servers cache responses of command executions
+  #     3. if a cached response is found for a command, don't execute the command twice and just returns the cached response
   #
 
   alias RaftedValue.{TermNumber, PidSet, Members, Leadership, Election, Logs, LogEntry, CommandResults, Config, Persistence, Snapshot, Monotonic}
