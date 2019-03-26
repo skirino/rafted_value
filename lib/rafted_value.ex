@@ -134,7 +134,7 @@ defmodule RaftedValue do
   end
 
   @doc """
-  Tell a member to forget about another member.
+  Tells a member to forget about another member.
 
   The sole purpose of this function is to recover a consensus group from majority failure.
   This operation is unsafe in the sense that it may not preserve invariants of the Raft algorithm
@@ -142,8 +142,8 @@ defmodule RaftedValue do
 
   Membership change introduced by this function is not propagated to other members.
   It is caller's responsibility
-  - to stop `member_to_remove` if it is still alive, and
-  - to notify all existing members of the membership change.
+  - to stop `member_to_remove` if it is still alive before calling this function, and
+  - to notify all existing members of the removal (i.e. call this function for all existing members).
   """
   defun force_remove_member(member :: GenServer.server, member_to_remove :: pid) :: :ok do
     (member, member_to_remove) when is_pid(member_to_remove) and member != member_to_remove ->
