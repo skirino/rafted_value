@@ -120,7 +120,7 @@ defmodule RaftedValue.Server do
         build_state_from_snapshot(snapshot, logs, nil)
       dir ->
         log_expansion_factor = Keyword.fetch!(options, :log_file_expansion_factor)
-        case Snapshot.read_lastest_snapshot_and_logs_if_available(dir) do
+        case Snapshot.read_latest_snapshot_and_logs_if_available(dir) do
           nil ->
             snapshot    = generate_empty_snapshot_for_lonely_leader(config)
             logs        = Logs.new_for_lonely_leader(snapshot.last_committed_entry, [])

@@ -18,7 +18,7 @@ defmodule RaftedValue.Snapshot do
     Map.put(is, :__struct__, __MODULE__)
   end
 
-  defun read_lastest_snapshot_and_logs_if_available(dir :: Path.t) :: nil | {t, SnapshotMetadata.t, Enum.t(LogEntry.t)} do
+  defun read_latest_snapshot_and_logs_if_available(dir :: Path.t) :: nil | {t, SnapshotMetadata.t, Enum.t(LogEntry.t)} do
     case find_snapshot_and_log_files(dir) do
       nil                              -> nil
       {snapshot_path, meta, log_paths} ->
