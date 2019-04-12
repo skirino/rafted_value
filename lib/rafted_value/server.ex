@@ -136,7 +136,7 @@ defmodule RaftedValue.Server do
     %Snapshot{
       members:              Members.new_for_lonely_leader(),
       term:                 0,
-      last_committed_entry: {0, 1, :leader_elected, self()},
+      last_committed_entry: {0, 1, :leader_elected2, [self()]},
       data:                 config.data_module.new(),
       command_results:      CommandResults.new(),
       config:               config,

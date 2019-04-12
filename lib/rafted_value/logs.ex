@@ -164,11 +164,10 @@ defmodule RaftedValue.Logs do
                                     term        :: TermNumber.t,
                                     persistence :: nil | Persistence.t) :: {t, LogEntry.t} do
     follower_index_pair = {i_max + 1, 0}
-    followers =
-      Members.other_members_list(members)
-      |> Map.new(fn follower -> {follower, follower_index_pair} end)
-    %__MODULE__{logs | followers: followers}
-    |> add_entry(persistence, fn i -> {term, i, :leader_elected, self()} end)
+    follower_pids = Members.other_members_list(members)
+    followers_map = Map.new(follower_pids, fn follower -> {follower, follower_index_pair} end)
+    %__MODULE__{logs | followers: followers_map}
+    |> add_entry(persistence, fn i -> {term, i, :leader_elected2, [self() | follower_pids]} end)
   end
 
   defun add_entry_on_restored_from_files(logs :: t, term :: TermNumber.t) :: {t, LogEntry.t} do

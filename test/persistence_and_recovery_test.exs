@@ -214,4 +214,32 @@ defmodule RaftedValue.PersistenceAndRecoveryTest do
     assert RaftedValue.query(p2, :get) == {:ok, n}
     assert :gen_statem.stop(p2) == :ok
   end
+
+  test "should correctly reset current consensus group members on successful election" do
+    dir_l  = Path.join(@tmp_dir, "l" )
+    dir_f1 = Path.join(@tmp_dir, "f1")
+    dir_f2 = Path.join(@tmp_dir, "f2")
+    {:ok, l}  = RaftedValue.start_link({:create_new_consensus_group, @config}, [persistence_dir: dir_l])
+    {:ok, f1} = RaftedValue.start_link({:join_existing_consensus_group, [l]} , [persistence_dir: dir_f1])
+    assert :gen_statem.stop(f1) == :ok
+
+    # Now 1/2 is running, leader has to step down.
+    election_timeout_max = @config.election_timeout * 2
+    :timer.sleep(election_timeout_max)
+    assert RaftedValue.status(l).leader == nil
+
+    # Forcibly remove the dead pid to restore leader.
+    assert RaftedValue.force_remove_member(l, f1) == :ok
+    :timer.sleep(election_timeout_max)
+    assert RaftedValue.status(l).leader == l
+
+    # Now add another member and it should understand the current members (i.e. change due to force-remove should be recognized)
+    {:ok, f2} = RaftedValue.start_link({:join_existing_consensus_group, [l]} , [persistence_dir: dir_f2])
+:timer.sleep(100)
+    assert Enum.sort(RaftedValue.status(l ).members) == Enum.sort([l, f2])
+    assert Enum.sort(RaftedValue.status(f2).members) == Enum.sort([l, f2])
+
+    assert :gen_statem.stop(l ) == :ok
+    assert :gen_statem.stop(f2) == :ok
+  end
 end

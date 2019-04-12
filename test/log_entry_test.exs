@@ -62,7 +62,7 @@ defmodule RaftedValue.LogEntryTest do
 
   test "read_as_stream/1" do
     File.mkdir_p!(@dir)
-    initial_entry = {0, 1, :leader_elected, self()}
+    initial_entry = {0, 1, :leader_elected2, [self()]}
     meta          = %Persistence.SnapshotMetadata{path: Path.join(@dir, "snapshot_0_1"), term: 0, last_committed_index: 1, size: 100}
     persistence1  = Persistence.new_with_disk_snapshot(@dir, 10, meta, initial_entry)
 
@@ -78,7 +78,7 @@ defmodule RaftedValue.LogEntryTest do
 
   test "read_last_entry_index/1" do
     index_first   = :rand.uniform(1000)
-    initial_entry = {0, index_first, :leader_elected, self()}
+    initial_entry = {0, index_first, :leader_elected2, [self()]}
     meta          = %Persistence.SnapshotMetadata{path: Path.join(@dir, "snapshot_0_#{index_first}"), term: 0, last_committed_index: 1, size: 100}
     persistence1  = Persistence.new_with_disk_snapshot(@dir, 10, meta, initial_entry)
 
