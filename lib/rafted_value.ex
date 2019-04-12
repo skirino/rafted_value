@@ -127,6 +127,9 @@ defmodule RaftedValue do
 
   @doc """
   Replaces current leader of a consensus group from `current_leader` to `new_leader`.
+
+  By specifying `nil` as `new_leader`, you can cancel the previously-issued and stuck
+  attempt of replacing leader.
   """
   defun replace_leader(current_leader :: GenServer.server, new_leader :: nil | pid) :: :ok | {:error, replace_leader_error_reason} do
     (current_leader, new_leader) when new_leader == nil or is_pid(new_leader) ->
