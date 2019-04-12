@@ -8,10 +8,18 @@ defmodule RaftedValue.PersistenceAndRecoveryTest do
 
   setup do
     File.rm_rf!(@tmp_dir)
-    Process.register(self(), :test_runner)
+    wait_until_other_test_runner_process_dead_and_register()
     on_exit(fn ->
       File.rm_rf!(@tmp_dir)
     end)
+  end
+
+  defp wait_until_other_test_runner_process_dead_and_register() do
+    ref = Process.monitor(:test_runner)
+    receive do
+      {:DOWN, ^ref, :process, _, _} -> :ok
+    end
+    Process.register(self(), :test_runner)
   end
 
   defp read_all_live_log_entries(i_committed) do
