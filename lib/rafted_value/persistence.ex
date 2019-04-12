@@ -105,15 +105,19 @@ defmodule RaftedValue.Persistence do
   end
 
   defunp find_obsolete_snapshots(dir :: Path.t, snapshot_basename :: String.t) :: [Path.t] do
-    Path.wildcard(Path.join(dir, "snapshot_*"))
+    list_snapshots_in(dir)
     |> Enum.filter(fn path -> Path.basename(path) != snapshot_basename end)
-    |> Enum.sort_by(&snapshot_path_to_term_and_index/1, &>=/2)
     |> Enum.drop(1) # Keep one more latest snapshot
   end
 
-  defunp snapshot_path_to_term_and_index(p :: Path.t) :: {TermNumber.t, LogIndex.t} do
-    ["snapshot", t, i] = Path.basename(p) |> String.split("_")
-    {String.to_integer(t), String.to_integer(i)}
+  defun list_snapshots_in(dir :: Path.t) :: [Path.t] do
+    Path.wildcard(Path.join(dir, "snapshot_*"))
+    |> Enum.sort_by(&snapshot_path_to_commit_index/1, &>=/2) # newest first
+  end
+
+  defunp snapshot_path_to_commit_index(p :: Path.t) :: LogIndex.t do
+    ["snapshot", _term, index] = Path.basename(p) |> String.split("_")
+    String.to_integer(index)
   end
 
   defunp find_log_files_with_committed_entries_only(dir :: Path.t, i_committed :: LogIndex.t) :: [Path.t] do

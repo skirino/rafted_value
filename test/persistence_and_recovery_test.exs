@@ -186,4 +186,24 @@ defmodule RaftedValue.PersistenceAndRecoveryTest do
     assert length(snapshot_paths) == 2
     refute Path.join(@tmp_dir, "snapshot_0_1") in snapshot_paths
   end
+
+  test "should recover from the latest snapshot and logs" do
+    {:ok, p1} = RaftedValue.start_link({:create_new_consensus_group, @config}, [persistence_dir: @tmp_dir])
+    Enum.find(0 .. 300, fn i ->
+      assert RaftedValue.command(p1, :inc) == {:ok, i}
+      snapshot_index =
+        :sys.get_state(p1)
+        |> elem(1)
+        |> Map.fetch!(:persistence)
+        |> Map.fetch!(:latest_snapshot_metadata)
+        |> Map.fetch!(:last_committed_index)
+      snapshot_index >= 100
+    end)
+    {:ok, n} = RaftedValue.query(p1, :get)
+    assert :gen_statem.stop(p1) == :ok
+
+    {:ok, p2} = RaftedValue.start_link({:create_new_consensus_group, @config}, [persistence_dir: @tmp_dir])
+    assert RaftedValue.query(p2, :get) == {:ok, n}
+    assert :gen_statem.stop(p2) == :ok
+  end
 end

@@ -32,7 +32,7 @@ defmodule RaftedValue.Snapshot do
   end
 
   defunp find_snapshot_and_log_files(dir :: Path.t) :: nil | {Path.t, SnapshotMetadata.t, [Path.t]} do
-    case Path.wildcard(Path.join(dir, "snapshot_*")) |> List.last() do
+    case Persistence.list_snapshots_in(dir) |> List.first() do
       nil           -> nil
       snapshot_path ->
         ["snapshot", term_str, last_index_str] = Path.basename(snapshot_path) |> String.split("_")
