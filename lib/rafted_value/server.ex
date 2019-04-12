@@ -791,20 +791,20 @@ defmodule RaftedValue.Server do
   defunp leader_apply_committed_log_entry_without_membership_change(entry :: LogEntry.t, %State{} = state) :: State.t do
     # leader is recovering from snapshot & log in disk; there's currently no other member and thus membership-change-related log entries are neglected here
     case entry do
-      {_term, _index, :command                 , tuple     } -> run_command(state, tuple, true)
-      {_term, _index, :query                   , tuple     } -> run_query(state, tuple); state
-      {_term, _index, :change_config           , new_config} -> %State{state | config: new_config}
-      {_term, _index, _add_or_remove_or_restore, _         } -> state
+      {_term, _index, :command      , tuple     } -> run_command(state, tuple, true)
+      {_term, _index, :query        , tuple     } -> run_query(state, tuple); state
+      {_term, _index, :change_config, new_config} -> %State{state | config: new_config}
+      {_term, _index, _otherwise    , _         } -> state
     end
   end
 
   defunp nonleader_apply_committed_log_entry(entry :: LogEntry.t, %State{members: members} = state) :: State.t do
     case entry do
-      {_term, _index, :command                    , tuple        } -> run_command(state, tuple, false)
-      {_term, _index, :change_config              , new_config   } -> %State{state | config: new_config}
-      {_term, index , :add_follower               , _follower_pid} -> %State{state | members: Members.membership_change_committed(members, index)}
-      {_term, index , :remove_follower            , _follower_pid} -> %State{state | members: Members.membership_change_committed(members, index)}
-      {_term, _index, _query_or_elected_or_restore, _            } -> state
+      {_term, _index, :command        , tuple        } -> run_command(state, tuple, false)
+      {_term, _index, :change_config  , new_config   } -> %State{state | config: new_config}
+      {_term, index , :add_follower   , _follower_pid} -> %State{state | members: Members.membership_change_committed(members, index)}
+      {_term, index , :remove_follower, _follower_pid} -> %State{state | members: Members.membership_change_committed(members, index)}
+      {_term, _index, _otherwise      , _            } -> state
     end
   end
 
