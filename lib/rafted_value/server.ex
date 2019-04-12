@@ -773,7 +773,10 @@ defmodule RaftedValue.Server do
         state
       {_term, _index, :change_config, new_config} ->
         %State{state | config: new_config}
-      {_term, _index, :leader_elected, leader_pid} ->
+      {_term, _index, :leader_elected, leader_pid} -> # Obsolete format, newer version uses `:leader_elected2`
+        if leader_pid == self(), do: hook.on_elected(data)
+        state
+      {_term, _index, :leader_elected2, [leader_pid | _follower_pids]} ->
         if leader_pid == self(), do: hook.on_elected(data)
         state
       {_term, index , :add_follower, follower_pid} ->

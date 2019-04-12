@@ -245,10 +245,11 @@ defmodule RaftedValue.Logs do
 
   defunp change_members(entry :: LogEntry.t, %Members{all: set} = members) :: Members.t do
     case entry do
-      {_t, _i, :add_follower      , pid} -> %Members{members | all: PidSet.put(set, pid)         , uncommitted_membership_change: entry}
-      {_t, _i, :remove_follower   , pid} -> %Members{members | all: PidSet.delete(set, pid)      , uncommitted_membership_change: entry}
-      {_t, _i, :restore_from_files, pid} -> %Members{members | all: PidSet.put(PidSet.new(), pid), uncommitted_membership_change: nil  }
-      _                                  -> members
+      {_t, _i, :add_follower      , pid } -> %Members{members | all: PidSet.put(set, pid)         , uncommitted_membership_change: entry}
+      {_t, _i, :remove_follower   , pid } -> %Members{members | all: PidSet.delete(set, pid)      , uncommitted_membership_change: entry}
+      {_t, _i, :restore_from_files, pid } -> %Members{members | all: PidSet.put(PidSet.new(), pid), uncommitted_membership_change: nil  }
+      {_t, _i, :leader_elected2   , pids} -> %Members{members | all: PidSet.from_list(pids)}
+      _                                     -> members
     end
   end
 

@@ -6,10 +6,11 @@ defmodule RaftedValue.LogEntry do
   @type t :: {TermNumber.t, LogIndex.t, :command           , {GenServer.from, Data.command_arg, reference}}
            | {TermNumber.t, LogIndex.t, :query             , {GenServer.from, Data.query_arg}}
            | {TermNumber.t, LogIndex.t, :change_config     , Config.t}
-           | {TermNumber.t, LogIndex.t, :leader_elected    , pid}
+           | {TermNumber.t, LogIndex.t, :leader_elected    , pid} # Old format (< 0.11), newer version (>= 0.11) uses :leader_elected2. Will be removed in future versions.
            | {TermNumber.t, LogIndex.t, :add_follower      , pid}
            | {TermNumber.t, LogIndex.t, :remove_follower   , pid}
            | {TermNumber.t, LogIndex.t, :restore_from_files, pid}
+           | {TermNumber.t, LogIndex.t, :leader_elected2   , [pid]}
 
   defun valid?(v :: any) :: boolean do
     {_, _, _, _} -> true
@@ -23,6 +24,7 @@ defmodule RaftedValue.LogEntry do
   defp entry_type_to_tag(:add_follower      ), do: 4
   defp entry_type_to_tag(:remove_follower   ), do: 5
   defp entry_type_to_tag(:restore_from_files), do: 6
+  defp entry_type_to_tag(:leader_elected2   ), do: 7
 
   defp tag_to_entry_type(0), do: {:ok, :command           }
   defp tag_to_entry_type(1), do: {:ok, :query             }
@@ -31,6 +33,7 @@ defmodule RaftedValue.LogEntry do
   defp tag_to_entry_type(4), do: {:ok, :add_follower      }
   defp tag_to_entry_type(5), do: {:ok, :remove_follower   }
   defp tag_to_entry_type(6), do: {:ok, :restore_from_files}
+  defp tag_to_entry_type(7), do: {:ok, :leader_elected2   }
   defp tag_to_entry_type(_), do: :error
 
   defun to_binary({term, index, entry_type, others} :: t) :: binary do
