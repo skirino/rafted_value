@@ -64,8 +64,8 @@ defmodule RaftedValue.PersistenceAndRecoveryTest do
     assert in_memory_and_disk_logs_same?(1..1)
     assert :gen_statem.stop(@name) == :ok
     snapshot_path1 = Path.join(@tmp_dir, "snapshot_0_1")
-    assert %Snapshot{} = read_snapshot(snapshot_path1)
-    snapshot_committed_index1 = 1
+    {_, snapshot_committed_index1, _, _} = read_snapshot(snapshot_path1).last_committed_entry
+    assert snapshot_committed_index1 == 1
 
     {:ok, pid} = RaftedValue.start_link({:create_new_consensus_group, @config}, [name: @name, persistence_dir: @tmp_dir])
     assert_received({:restored_from_files, ^pid})
@@ -83,8 +83,8 @@ defmodule RaftedValue.PersistenceAndRecoveryTest do
     assert in_memory_and_disk_logs_same?(snapshot_committed_index1 .. snapshot_committed_index1 + 43)
     assert :gen_statem.stop(@name) == :ok
     [snapshot_path2] = Path.wildcard(Path.join(@tmp_dir, "snapshot_*")) |> List.delete(snapshot_path1)
-    assert %Snapshot{} = read_snapshot(snapshot_path2)
     snapshot_committed_index2 = snapshot_path_to_committed_index(snapshot_path2)
+    assert {_, ^snapshot_committed_index2, _, _} = read_snapshot(snapshot_path2).last_committed_entry
 
     {:ok, pid} = RaftedValue.start_link({:create_new_consensus_group, @config}, [name: @name, persistence_dir: @tmp_dir])
     assert_receive({:restored_from_files, ^pid})
