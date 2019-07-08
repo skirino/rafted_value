@@ -295,7 +295,7 @@ defmodule RaftedValue.Logs do
     # because `followers` field is available only to leader processes.
     # If a follower lags too behind then leader gives up log shipping and sends a snapshot, so it's OK.
     case index_removable_upto - @extra_log_entries_kept_in_memory + 1 do
-      new_i_min when new_i_min > i_min -> %__MODULE__{logs | map: Map.drop(map, i_min .. new_i_min - 1), i_min: new_i_min}
+      new_i_min when new_i_min > i_min -> %__MODULE__{logs | map: Map.drop(map, Enum.to_list(i_min .. new_i_min - 1)), i_min: new_i_min}
       _                                -> logs
     end
   end
