@@ -9,7 +9,7 @@
 
 ## Design
 
-- Provides [linearizable](https://en.wikipedia.org/wiki/Linearizability) semantics for operations on a stored value.
+- Provides [linearizable](https://en.wikipedia.org/wiki/Linearizability) semantics for operations on a replicated value.
 - Implements memory-based state machine with optional persistence (writing logs, making snapshots with log compaction, restoring state from snapshot & log files)
 - Flexible data model: replicate arbitrary data structure
 - Supports membership changes:
@@ -119,7 +119,7 @@ iex(1@skirino-Manjaro)11> RaftedValue.command(:foo, :dequeue)
 ## Links
 
 - [Raft official website](https://raft.github.io/)
-- [The original paper](http://ramcloud.stanford.edu/raft.pdf)
-- [The thesis](https://ramcloud.stanford.edu/~ongaro/thesis.pdf)
+- [The original paper](https://raft.github.io/raft.pdf) and
+  [the thesis](https://github.com/ongardie/dissertation#readme) about the Raft protocol
 - [raft_fleet](https://github.com/skirino/raft_fleet) : Elixir library to run multiple `RaftedValue` consensus groups in a cluster of ErlangVMs
-- [My slides to introduce rafted_value and raft_fleet](https://skirino.github.io/slides/raft_fleet.html#/)
+- [skirino's slides to introduce rafted_value and raft_fleet](https://skirino.github.io/slides/raft_fleet.html#/)
