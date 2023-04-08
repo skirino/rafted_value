@@ -4,7 +4,6 @@
 - [Hex package information](https://hex.pm/packages/rafted_value)
 
 [![Hex.pm](http://img.shields.io/hexpm/v/rafted_value.svg)](https://hex.pm/packages/rafted_value)
-[![Build Status](https://travis-ci.com/skirino/rafted_value.svg)](https://travis-ci.com/github/skirino/rafted_value)
 [![Coverage Status](https://coveralls.io/repos/github/skirino/rafted_value/badge.svg?branch=master)](https://coveralls.io/github/skirino/rafted_value?branch=master)
 
 ## Design
