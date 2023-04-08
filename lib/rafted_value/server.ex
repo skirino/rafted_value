@@ -229,8 +229,7 @@ defmodule RaftedValue.Server do
     rescue
       e ->
         # Pass `self()` to caller of `Supervisor.start_child/2` for cleanup of consensus group
-        stacktrace = System.stacktrace()
-        reraise(RaftedValue.AddFollowerError, [message: Exception.message(e), pid: self()], stacktrace)
+        reraise(RaftedValue.AddFollowerError, [message: Exception.message(e), pid: self()], __STACKTRACE__)
     end
   end
 
