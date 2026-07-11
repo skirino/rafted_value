@@ -45,7 +45,7 @@ defmodule RaftedValue.LogEntry do
   defunpt extract_from_binary(bin :: binary) :: nil | {t, rest :: binary} do
     with <<term :: size(64), index :: size(64), type_tag :: size(8), size1 :: size(64)>> <> rest1 <- bin,
          {:ok, entry_type} = tag_to_entry_type(type_tag),
-         <<others_bin :: binary-size(size1), size2 :: size(64)>> <> rest2 <- rest1 do
+         <<others_bin :: binary-size(^size1), size2 :: size(64)>> <> rest2 <- rest1 do
       if size1 == size2 do
         {{term, index, entry_type, :erlang.binary_to_term(others_bin)}, rest2}
       else
@@ -68,7 +68,7 @@ defmodule RaftedValue.LogEntry do
   end
 
   def read_as_stream(log_path) do
-    File.stream!(log_path, [], 4096)
+    File.stream!(log_path, 4096)
     |> Stream.transform(<<>>, fn(bin, carryover) ->
       extract_multiple_from_binary(carryover <> bin)
     end)

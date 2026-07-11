@@ -20,9 +20,9 @@ defmodule RaftedValue.Members do
     PidSet.delete(all, self()) |> PidSet.to_list()
   end
 
-  defun put_leader(m :: t, leader_or_nil :: nil | pid) :: t do
+  defun put_leader(m = %__MODULE__{} :: t, leader_or_nil :: nil | pid) :: t do
     # when resetting `leader`, `pending_leader_change` field should be discarded (if any)
-    %__MODULE__{m | leader: leader_or_nil, pending_leader_change: nil}
+    %{m | leader: leader_or_nil, pending_leader_change: nil}
   end
 
   defun start_adding_follower(%__MODULE__{all: all} = m,

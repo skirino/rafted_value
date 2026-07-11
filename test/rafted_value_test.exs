@@ -54,7 +54,7 @@ defmodule RaftedValueTest do
     dir = if persist?, do: Path.join(@tmp_dir, "leader"), else: nil
     {:ok, leader} = RaftedValue.start_link({:create_new_consensus_group, config}, [persistence_dir: dir])
     followers =
-      Enum.map(1 .. n_follower, fn i ->
+      Enum.map(Range.new(1, n_follower, 1), fn i ->
         dir = if persist?, do: Path.join(@tmp_dir, "follower#{i}"), else: nil
         add_follower(leader, nil, dir)
       end)
@@ -140,7 +140,14 @@ defmodule RaftedValueTest do
     :error_logger.tty(false) # suppress crash report due to error in `init/1`
     try do
       {:error, _} = RaftedValue.start_link({:join_existing_consensus_group, [:unknown, :member]})
-      assert_receive({:EXIT, _pid, _})
+      # For Erlang/OTP <= 25, an initialization failure of a process spawned by `start_link`
+      # leaves an `:EXIT` message in the caller's mailbox. This behavior was changed in Erlang/OTP 26:
+      # the message is automatically consumed by `:prob_lib.init_fail/2,3`.
+      if System.otp_release() |> String.to_integer() <= 25 do
+        assert_receive({:EXIT, _pid, _})
+      else
+        refute_receive({:EXIT, _pid, _})
+      end
     after
       :error_logger.tty(true)
     end
@@ -450,7 +457,7 @@ defmodule RaftedValueTest do
     assert Process.alive?(leader)
 
     {:leader, state} = :sys.get_state(l)
-    assert RaftedValue.Server.code_change('old_vsn', :leader, state, :extra) == {:ok, :leader, state}
+    assert RaftedValue.Server.code_change(~c"old_vsn", :leader, state, :extra) == {:ok, :leader, state}
   end
 
   defmodule CommunicationWithDelay do

@@ -5,19 +5,22 @@ defmodule RaftedValue.Mixfile do
 
   def project() do
     [
-      app:               :rafted_value,
-      version:           "0.11.2",
-      elixir:            "~> 1.7",
-      build_embedded:    Mix.env() == :prod,
-      start_permanent:   Mix.env() == :prod,
-      deps:              deps(),
-      description:       "Replicated and synchronized values wrapped by processes",
-      package:           package(),
-      source_url:        @github_url,
-      homepage_url:      @github_url,
-      test_coverage:     [tool: ExCoveralls],
-      preferred_cli_env: [coveralls: :test, "coveralls.detail": :test, "coveralls.post": :test, "coveralls.html": :test],
+      app:             :rafted_value,
+      version:         "0.11.2",
+      elixir:          "~> 1.16",
+      build_embedded:  Mix.env() == :prod,
+      start_permanent: Mix.env() == :prod,
+      deps:            deps(),
+      description:     "Replicated and synchronized values wrapped by processes",
+      package:         package(),
+      source_url:      @github_url,
+      homepage_url:    @github_url,
+      test_coverage:   [tool: ExCoveralls],
     ]
+  end
+
+  def cli() do
+    [preferred_envs: [coveralls: :test, "coveralls.detail": :test, "coveralls.post": :test, "coveralls.html": :test]]
   end
 
   def application() do

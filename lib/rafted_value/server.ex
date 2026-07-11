@@ -164,12 +164,12 @@ defmodule RaftedValue.Server do
   end
 
   defp recover_state_from_snapshot_and_log(dir,
-                                           {snapshot_from_disk, snapshot_meta, log_entries},
+                                           {snapshot_from_disk = %Snapshot{}, snapshot_meta, log_entries},
                                            log_expansion_factor) do
     # In this case we neglect `config` given in the argument to `RaftedValue.start_link/2`.
     # On the other hand we discard `members` obtained from disk, as `self()` is the sole member of this newly-spawned consensus group.
     members                   = Members.new_for_lonely_leader()
-    snapshot                  = %Snapshot{snapshot_from_disk | members: members}
+    snapshot                  = %{snapshot_from_disk | members: members}
     logs1                     = Logs.new_for_lonely_leader(snapshot.last_committed_entry, log_entries)
     {logs2, entry_restore}    = Logs.add_entry_on_restored_from_files(logs1, snapshot.term)
     persistence               = Persistence.new_with_disk_snapshot(dir, log_expansion_factor, snapshot_meta, entry_restore)
@@ -679,8 +679,8 @@ defmodule RaftedValue.Server do
   end
   defp handle_call_common({:snapshot_created, path, term, index, size}, from, _state_name, %State{persistence: persistence} = state) do
     snapshot_meta   = %Persistence.SnapshotMetadata{path: path, term: term, last_committed_index: index, size: size}
-    new_persistence = %Persistence{persistence | latest_snapshot_metadata: snapshot_meta}
-    new_state       = %State{state | persistence: new_persistence}
+    new_persistence = %{persistence | latest_snapshot_metadata: snapshot_meta}
+    new_state       = %{state | persistence: new_persistence}
     keep_fsm_state_and_reply(new_state, from, :ok)
   end
   defp handle_call_common({:force_remove_member, member_to_remove}, from, _state_name, %State{members: members} = state) do
@@ -717,7 +717,7 @@ defmodule RaftedValue.Server do
   end
 
   def handle_info_common({:DOWN, _ref, :process, _pid, _reason}, state_name, %State{persistence: persistence} = state) do
-    %State{state | persistence: %Persistence{persistence | snapshot_writer: nil}}
+    %{state | persistence: %{persistence | snapshot_writer: nil}}
     |> next_state(state_name)
   end
 
