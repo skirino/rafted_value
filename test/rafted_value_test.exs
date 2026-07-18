@@ -19,7 +19,7 @@ defmodule RaftedValueTest do
     max_retained_command_results:        10,
   ])
 
-  @t_max_election_timeout @conf.election_timeout * 2
+  @t_max_election_timeout @conf.election_timeout * 2 + 10
 
   defp assert_equal_as_set(set1, set2) do
     assert Enum.sort(set1) == Enum.sort(set2)

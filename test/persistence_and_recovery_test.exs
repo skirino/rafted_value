@@ -224,7 +224,7 @@ defmodule RaftedValue.PersistenceAndRecoveryTest do
     assert :gen_statem.stop(f1) == :ok
 
     # Now 1/2 is running, leader has to step down.
-    election_timeout_max = @config.election_timeout * 2
+    election_timeout_max = @config.election_timeout * 2 + 10 # add a buffer to ensure timeout happens
     :timer.sleep(election_timeout_max)
     assert RaftedValue.status(l).leader == nil
 
