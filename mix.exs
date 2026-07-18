@@ -6,7 +6,7 @@ defmodule RaftedValue.Mixfile do
   def project() do
     [
       app:             :rafted_value,
-      version:         "0.11.2",
+      version:         "0.12.0",
       elixir:          "~> 1.16",
       build_embedded:  Mix.env() == :prod,
       start_permanent: Mix.env() == :prod,
@@ -20,7 +20,9 @@ defmodule RaftedValue.Mixfile do
   end
 
   def cli() do
-    [preferred_envs: [coveralls: :test, "coveralls.detail": :test, "coveralls.post": :test, "coveralls.html": :test]]
+    [
+      preferred_envs: [coveralls: :test, "coveralls.detail": :test, "coveralls.post": :test, "coveralls.html": :test],
+    ]
   end
 
   def application() do
