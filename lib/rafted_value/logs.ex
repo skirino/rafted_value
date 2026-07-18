@@ -27,7 +27,7 @@ defmodule RaftedValue.Logs do
   #
   # for leader
   #
-  defun new_for_lonely_leader(last_committed_entry :: LogEntry.t, entries_to_append :: Enum.t(LogEntry.t)) :: t do
+  defun new_for_lonely_leader(last_committed_entry :: LogEntry.t, entries_to_append :: Enumerable.t(LogEntry.t)) :: t do
     logs = new_with_last_entry(last_committed_entry) |> Map.put(:followers, %{})
     Enum.reduce(entries_to_append, logs, fn({_, i, _, _} = entry, %__MODULE__{map: m} = l) ->
       %__MODULE__{l | map: Map.put(m, i, entry), i_max: i}

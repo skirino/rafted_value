@@ -24,7 +24,7 @@ defmodule RaftedValue.Mixfile do
   end
 
   def application() do
-    [applications: [:croma]]
+    if Mix.env() == :dev, do: [extra_applications: [:mix]], else: []
   end
 
   defp deps() do
