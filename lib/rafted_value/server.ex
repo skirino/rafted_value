@@ -591,7 +591,7 @@ defmodule RaftedValue.Server do
     if leadership, do: Leadership.stop_timers(leadership)
     new_members  = Members.put_leader(members, nil)
     new_election = Election.update_for_follower(election, config)
-    %State{state | members: new_members, current_term: new_term, leadership: nil, election: new_election}
+    %{state | members: new_members, current_term: new_term, leadership: nil, election: new_election}
   end
 
   defunp handle_install_snapshot(%Snapshot{members:              members,
@@ -603,7 +603,7 @@ defmodule RaftedValue.Server do
     become_follower_if_new_term_started(snapshot, state, fn ->
       new_logs        = Logs.new_for_new_follower(last_entry)
       new_persistence = if is_nil(persistence), do: nil, else: Persistence.unset_snapshot_metadata(persistence) # invalidate existing snapshot file
-      %State{state | members: members, current_term: term, logs: new_logs, data: data, command_results: command_results, persistence: new_persistence}
+      %{state | members: members, current_term: term, logs: new_logs, data: data, command_results: command_results, persistence: new_persistence}
       |> reset_election_timer_on_leader_message()
     end)
   end
