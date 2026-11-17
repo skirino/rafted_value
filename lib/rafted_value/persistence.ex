@@ -1,6 +1,12 @@
 use Croma
 
 defmodule RaftedValue.Persistence do
+  # Note on `votedFor` (and `currentTerm`):
+  # Unlike the Raft paper, we don't persist them, as they are unnecessary for safety in this implementation.
+  # Files on disk are read only when restoring a *new* consensus group in which `self()` is the sole member;
+  # a restarted process never rejoins its original group under the same identity (members are identified by pid).
+  # If we ever support rejoining an existing group from disk with the same identity, they must be persisted.
+
   alias RaftedValue.{TermNumber, LogIndex, LogEntry, Snapshot}
 
   defmodule SnapshotMetadata do
