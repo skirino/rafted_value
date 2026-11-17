@@ -168,12 +168,16 @@ defmodule RaftedValue.Server do
                                            log_expansion_factor) do
     # In this case we neglect `config` given in the argument to `RaftedValue.start_link/2`.
     # On the other hand we discard `members` obtained from disk, as `self()` is the sole member of this newly-spawned consensus group.
-    members                   = Members.new_for_lonely_leader()
-    snapshot                  = %{snapshot_from_disk | members: members}
-    logs1                     = Logs.new_for_lonely_leader(snapshot.last_committed_entry, log_entries)
-    {logs2, entry_restore}    = Logs.add_entry_on_restored_from_files(logs1, snapshot.term)
-    persistence               = Persistence.new_with_disk_snapshot(dir, log_expansion_factor, snapshot_meta, entry_restore)
-    {logs3, entries_to_apply} = Logs.commit_to_latest(logs2, persistence)
+    # The restored process starts a new term, which must be larger than any term found in the snapshot and log files
+    # (otherwise the term of `entry_restore` may become smaller than those of preceding log entries).
+    logs1                      = Logs.new_for_lonely_leader(snapshot_from_disk.last_committed_entry, log_entries)
+    {term_last_entry, _, _, _} = Logs.last_entry(logs1)
+    term                       = max(snapshot_from_disk.term, term_last_entry) + 1
+    members                    = Members.new_for_lonely_leader()
+    snapshot                   = %{snapshot_from_disk | members: members, term: term}
+    {logs2, entry_restore}     = Logs.add_entry_on_restored_from_files(logs1, term)
+    persistence                = Persistence.new_with_disk_snapshot(dir, log_expansion_factor, snapshot_meta, entry_restore)
+    {logs3, entries_to_apply}  = Logs.commit_to_latest(logs2, persistence)
     state1                    = build_state_from_snapshot(snapshot, logs3, persistence)
     Process.put(:rafted_value_restoring, true)
     state2 = Enum.reduce(entries_to_apply, state1, &leader_apply_committed_log_entry_without_membership_change/2) # `entry_restore` results in a no-op and thus neglected

@@ -101,6 +101,20 @@ defmodule RaftedValue.PersistenceAndRecoveryTest do
     assert :gen_statem.stop(@name) == :ok
   end
 
+  test "restored leader should start a new term larger than any term in snapshot and log files" do
+    {:ok, _} = RaftedValue.start_link({:create_new_consensus_group, @config}, [name: @name, persistence_dir: @tmp_dir])
+    assert RaftedValue.status(@name).current_term == 0
+    assert :gen_statem.stop(@name) == :ok
+
+    Enum.each(1..3, fn term ->
+      {:ok, _} = RaftedValue.start_link({:create_new_consensus_group, @config}, [name: @name, persistence_dir: @tmp_dir])
+      assert RaftedValue.status(@name).current_term == term
+      assert RaftedValue.command(@name, :inc) == {:ok, term - 1}
+      assert :gen_statem.stop(@name) == :ok
+      assert {^term, _} = RaftedValue.read_last_log_term_and_index(@tmp_dir)
+    end)
+  end
+
   test "uncommitted logs should be committed by lonely leader immediately after recovery" do
     {:ok, l} = RaftedValue.start_link({:create_new_consensus_group, @config}, [persistence_dir: @tmp_dir])
     {:ok, f} = RaftedValue.start_link({:join_existing_consensus_group, [l]})
