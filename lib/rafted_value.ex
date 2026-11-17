@@ -241,9 +241,21 @@ defmodule RaftedValue do
 
   @doc """
   Obtains last log index from the log files stored in `dir`.
+
+  Deprecated in favor of `read_last_log_term_and_index/1`.
   """
   defun read_last_log_index(dir :: Path.t) :: nil | LogIndex.t do
     Persistence.read_last_log_index(dir)
+  end
+
+  @doc """
+  Obtains term and index of the last log entry from the log files stored in `dir`.
+
+  When choosing a member from which a consensus group is restored, use this function and compare
+  `{term, index}` pairs (as in Raft's leader election).
+  """
+  defun read_last_log_term_and_index(dir :: Path.t) :: nil | {TermNumber.t, LogIndex.t} do
+    Persistence.read_last_log_term_and_index(dir)
   end
 
   defp call(server, msg, timeout \\ 5000, call_module \\ :gen_statem) do

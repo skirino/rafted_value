@@ -91,11 +91,15 @@ defmodule RaftedValue.LogEntryTest do
     [log_path] = Path.wildcard(Path.join(@dir, "log_*"))
     assert LogEntry.read_last_entry_index(log_path) == index_last
     assert Persistence.read_last_log_index(@dir)    == index_last
+    {term_last, ^index_last, _, _} = List.last(entries)
+    assert LogEntry.read_last_entry_term_and_index(log_path) == {term_last, index_last}
+    assert RaftedValue.read_last_log_term_and_index(@dir)    == {term_last, index_last}
   end
 
   test "read_last_entry_index/1 should return nil on failure" do
     assert LogEntry.read_last_entry_index(Path.join(@dir, "nonexisting")) == nil
     assert RaftedValue.read_last_log_index(@dir)                          == nil
+    assert RaftedValue.read_last_log_term_and_index(@dir)                 == nil
 
     bin = :erlang.term_to_binary(self())
     size = byte_size(bin)
@@ -109,6 +113,7 @@ defmodule RaftedValue.LogEntryTest do
       File.write!(path, content)
       assert LogEntry.read_last_entry_index(path)  == nil
       assert RaftedValue.read_last_log_index(@dir) == nil
+      assert RaftedValue.read_last_log_term_and_index(@dir) == nil
     end)
   end
 end

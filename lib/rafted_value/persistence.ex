@@ -151,11 +151,18 @@ defmodule RaftedValue.Persistence do
   end
 
   defun read_last_log_index(dir :: Path.t) :: nil | LogIndex.t do
+    case read_last_log_term_and_index(dir) do
+      nil        -> nil
+      {_, index} -> index
+    end
+  end
+
+  defun read_last_log_term_and_index(dir :: Path.t) :: nil | {TermNumber.t, LogIndex.t} do
     case Path.wildcard(Path.join(dir, "log_*")) do
       []    -> nil
       paths ->
         latest_log_path = Enum.max_by(paths, &extract_first_log_index_from_path/1)
-        LogEntry.read_last_entry_index(latest_log_path)
+        LogEntry.read_last_entry_term_and_index(latest_log_path)
     end
   end
 

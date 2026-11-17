@@ -75,13 +75,20 @@ defmodule RaftedValue.LogEntry do
   end
 
   defun read_last_entry_index(log_path :: Path.t) :: nil | LogIndex.t do
+    case read_last_entry_term_and_index(log_path) do
+      nil        -> nil
+      {_, index} -> index
+    end
+  end
+
+  defun read_last_entry_term_and_index(log_path :: Path.t) :: nil | {TermNumber.t, LogIndex.t} do
     case :file.open(log_path, [:raw, :binary]) do
-      {:ok, f}    -> read_last_entry_index_impl(f, File.stat!(log_path).size)
+      {:ok, f}    -> read_last_entry_term_and_index_impl(f, File.stat!(log_path).size)
       {:error, _} -> nil
     end
   end
 
-  defp read_last_entry_index_impl(f, size) do
+  defp read_last_entry_term_and_index_impl(f, size) do
     if size < 8 do
       nil
     else
@@ -90,9 +97,9 @@ defmodule RaftedValue.LogEntry do
       if last_entry_start_offset < 0 do
         nil
       else
-        {:ok, <<_term :: size(64), index :: size(64), type_tag :: size(8), binsize2 :: size(64)>>} = :file.pread(f, last_entry_start_offset, 25)
+        {:ok, <<term :: size(64), index :: size(64), type_tag :: size(8), binsize2 :: size(64)>>} = :file.pread(f, last_entry_start_offset, 25)
         case tag_to_entry_type(type_tag) do # minimal sanity checking
-          {:ok, _} when binsize2 == binsize1 -> index
+          {:ok, _} when binsize2 == binsize1 -> {term, index}
           _                                  -> nil
         end
       end
